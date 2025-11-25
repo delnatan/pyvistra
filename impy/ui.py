@@ -7,6 +7,7 @@ from qtpy.QtGui import QDragEnterEvent, QDropEvent
 from qtpy.QtWidgets import (
     QAction,
     QApplication,
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -14,11 +15,14 @@ from qtpy.QtWidgets import (
     QLabel,
     QMainWindow,
     QSlider,
+    QSpinBox,
     QVBoxLayout,
+    QHBoxLayout,
     QWidget,
     QToolBar,
     QButtonGroup,
 )
+from superqt import QRangeSlider
 from vispy import app, scene
 
 from .io import load_image
@@ -114,6 +118,10 @@ class ImageWindow(QMainWindow):
         self.rois = []
         self.drawing_roi = None
         self.start_pos = None
+        # Editing State
+        self.dragging_roi = None
+        self.drag_handle = None
+        self.last_pos = None
         # Toolbar is now external
 
         # 9. Events
@@ -234,10 +242,40 @@ class ImageWindow(QMainWindow):
         if self.Z > 1:
             row = QHBoxLayout()
             row.addWidget(QLabel("Z-Pos"))
-            sl = QSlider(Qt.Horizontal)
-            sl.setRange(0, self.Z - 1)
-            sl.valueChanged.connect(self.on_z_change)
-            row.addWidget(sl)
+            
+            # Standard Slider
+            self.z_slider = QSlider(Qt.Horizontal)
+            self.z_slider.setRange(0, self.Z - 1)
+            self.z_slider.valueChanged.connect(self.on_z_change)
+            row.addWidget(self.z_slider)
+            
+            # Projection Controls
+            self.chk_proj = QCheckBox("Max Proj")
+            self.chk_proj.toggled.connect(self.toggle_z_projection)
+            row.addWidget(self.chk_proj)
+            
+            self.z_range_slider_widget = QWidget()
+            self.z_range_slider_layout = QHBoxLayout()
+            self.z_range_slider_layout.setContentsMargins(0, 0, 0, 0)
+
+            self.z_range_slider = QRangeSlider(Qt.Horizontal)
+            self.z_range_slider_min_label = QLabel("0")
+            self.z_range_slider_max_label = QLabel(f"{self.Z - 1}")
+            self.z_range_slider.setRange(0, self.Z - 1)
+            self.z_range_slider.setValue((0, self.Z - 1))
+            self.z_range_slider.barIsVisible = True
+            self.z_range_slider.barIsEnabled = True
+            self.z_range_slider.barIsEnabled = False
+
+            self.z_range_slider_layout.addWidget(self.z_range_slider_min_label)
+            self.z_range_slider_layout.addWidget(self.z_range_slider)
+            self.z_range_slider_layout.addWidget(self.z_range_slider_max_label)
+            self.z_range_slider_widget.setLayout(self.z_range_slider_layout)
+            self.z_range_slider_widget.setVisible(False)
+
+            self.z_range_slider.valueChanged.connect(self.on_z_proj_change)
+            row.addWidget(self.z_range_slider_widget)
+
             self.controls_layout.addLayout(row)
 
     def on_mode_change(self, index):
@@ -265,12 +303,29 @@ class ImageWindow(QMainWindow):
         self.t_idx = val
         self.update_view()
 
+    def toggle_z_projection(self, checked):
+        self.z_slider.setVisible(not checked)
+        self.z_range_slider_widget.setVisible(checked)
+        self.update_view()
+
+    def on_z_proj_change(self, val):
+        # update z-min/max labels
+        self.z_range_slider_min_label.setText(str(val[0]))
+        self.z_range_slider_max_label.setText(str(val[1]))
+        self.update_view()
+
     def on_z_change(self, val):
         self.z_idx = val
         self.update_view()
 
     def update_view(self):
-        self.renderer.update_slice(self.t_idx, self.z_idx)
+        if hasattr(self, 'chk_proj') and self.chk_proj.isChecked():
+            mn, mx = self.z_range_slider.value()
+            z_slice = slice(mn, mx + 1)
+            self.renderer.update_slice(self.t_idx, z_slice)
+        else:
+            self.renderer.update_slice(self.t_idx, self.z_idx)
+            
         self.canvas.update()
         if self.contrast_dialog and self.contrast_dialog.isVisible():
             self.contrast_dialog.refresh_ui()
@@ -282,10 +337,33 @@ class ImageWindow(QMainWindow):
 
     def on_mouse_press(self, event):
         tool = manager.active_tool
+        x, y = self._map_event_to_image(event)
+        
         if tool == "pointer":
+            # Hit Test (Reverse order to select top-most)
+            hit_roi = None
+            hit_handle = None
+            
+            for roi in reversed(self.rois):
+                res = roi.hit_test((x, y))
+                if res:
+                    hit_roi = roi
+                    hit_handle = res
+                    break
+            
+            # Update Selection
+            for roi in self.rois:
+                roi.select(roi is hit_roi)
+                
+            if hit_roi:
+                self.dragging_roi = hit_roi
+                self.drag_handle = hit_handle
+                self.last_pos = (x, y)
+                self.canvas.update()
+            else:
+                self.canvas.update()
             return
             
-        x, y = self._map_event_to_image(event)
         self.start_pos = (x, y)
         
         if tool == "coordinate":
@@ -324,13 +402,33 @@ class ImageWindow(QMainWindow):
             else:
                 self.info_label.setText("")
 
-        # 2. Update Drawing
+        # 2. ROI Editing
+        if self.dragging_roi and event.button == 1:
+            x, y = self._map_event_to_image(event)
+            dx = x - self.last_pos[0]
+            dy = y - self.last_pos[1]
+            
+            if self.drag_handle == 'center':
+                self.dragging_roi.move((dx, dy))
+            else:
+                self.dragging_roi.adjust(self.drag_handle, (x, y))
+                
+            self.last_pos = (x, y)
+            self.canvas.update()
+            return
+
+        # 3. Update Drawing
         if self.drawing_roi and event.button == 1:
             x, y = self._map_event_to_image(event)
             self.drawing_roi.update(self.start_pos, (x, y))
             self.canvas.update()
 
     def on_mouse_release(self, event):
+        if self.dragging_roi:
+            self.dragging_roi = None
+            self.drag_handle = None
+            self.last_pos = None
+            
         if self.drawing_roi:
             self.drawing_roi = None
             self.start_pos = None

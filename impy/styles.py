@@ -63,6 +63,13 @@ QRangeSlider::groove:horizontal {
     margin: 2px 0;
     border-radius: 3px;
 }
+QSlider{
+ background-color: none;
+}
+QSlider::add-page:vertical {
+  background: none;
+  border: none;
+}
 
 /* --- Buttons --- */
 QPushButton {

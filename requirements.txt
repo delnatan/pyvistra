@@ -4,3 +4,4 @@ qtpy
 PyQt6
 tifffile
 h5py
+superqt
