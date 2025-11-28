@@ -249,11 +249,14 @@ class ImageWindow(QMainWindow):
             self.z_slider.valueChanged.connect(self.on_z_change)
             row.addWidget(self.z_slider)
             
+            self.z_label = QLabel("0")
+            self.z_label.setFixedWidth(30) # Fixed width to prevent jumping
+            self.z_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            row.addWidget(self.z_label)
+            
             # Projection Controls
             self.chk_proj = QCheckBox("Max Proj")
             self.chk_proj.toggled.connect(self.toggle_z_projection)
-            row.addWidget(self.chk_proj)
-            
             self.z_range_slider_widget = QWidget()
             self.z_range_slider_layout = QHBoxLayout()
             self.z_range_slider_layout.setContentsMargins(0, 0, 0, 0)
@@ -275,7 +278,7 @@ class ImageWindow(QMainWindow):
 
             self.z_range_slider.valueChanged.connect(self.on_z_proj_change)
             row.addWidget(self.z_range_slider_widget)
-
+            row.addWidget(self.chk_proj)
             self.controls_layout.addLayout(row)
 
     def on_mode_change(self, index):
@@ -316,6 +319,8 @@ class ImageWindow(QMainWindow):
 
     def on_z_change(self, val):
         self.z_idx = val
+        if hasattr(self, 'z_label'):
+            self.z_label.setText(str(val))
         self.update_view()
 
     def update_view(self):

@@ -3,7 +3,7 @@ DARK_THEME = """
 QMainWindow, QDialog, QWidget {
     background-color: #2b2b2b;
     color: #e0e0e0;
-    font-family: sans-serif;
+    font-family: "Arial", "Helvetica",sans-serif;
     font-size: 12pt;
 }
 
@@ -15,7 +15,7 @@ QLabel#infoLabel {
     background-color: #202020;
     color: #40a9ff;
     padding: 1px 5px; 
-    font-family: "Consolas", "Monospace";
+    font-family: "Menlo", "Consolas", "Courier";
     border-top: 1px solid #3a3a3a;
     font-size: 9pt;
 }

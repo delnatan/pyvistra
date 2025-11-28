@@ -11,7 +11,7 @@ def main():
     qt_app = QApplication(sys.argv)
 
     # Apply global stylesheet
-    qt_app.setStyleSheet(DARK_THEME)
+    # qt_app.setStyleSheet(DARK_THEME)
 
     # Create the floating toolbar
     toolbar = Toolbar()

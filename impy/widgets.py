@@ -2,6 +2,7 @@ import numpy as np
 from qtpy.QtCore import Qt, Signal, QRectF
 from qtpy.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from qtpy.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QHBoxLayout,
@@ -282,15 +283,36 @@ class ContrastDialog(QDialog):
         
         layout.addLayout(gamma_layout)
 
-        # 4. Auto Button
+        # 4. Auto/Manual Contrast Buttons
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
+        
+        self.btn_loosen = QPushButton("-")
+        self.btn_loosen.setToolTip("Loosen Contrast (Expand Range)")
+        self.btn_loosen.setFixedWidth(30)
+        self.btn_loosen.clicked.connect(lambda: self.adjust_contrast(-1))
+        btn_layout.addWidget(self.btn_loosen)
+
         self.btn_auto = QPushButton("Auto Contrast")
         self.btn_auto.setCursor(Qt.PointingHandCursor)
-        self.btn_auto.clicked.connect(self.auto_contrast)
+        self.btn_auto.clicked.connect(self.reset_auto_contrast)
         btn_layout.addWidget(self.btn_auto)
+
+        self.btn_tighten = QPushButton("+")
+        self.btn_tighten.setToolTip("Tighten Contrast (Shrink Range)")
+        self.btn_tighten.setFixedWidth(30)
+        self.btn_tighten.clicked.connect(lambda: self.adjust_contrast(1))
+        btn_layout.addWidget(self.btn_tighten)
+
+        self.chk_all_channels = QCheckBox("All Channels")
+        self.chk_all_channels.setChecked(True)
+        btn_layout.addWidget(self.chk_all_channels)
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
+
+        # State for auto-contrast
+        self.pct_low = 0.2
+        self.pct_high = 99.98
 
         # Initial Load
         self.refresh_ui()
@@ -350,12 +372,65 @@ class ContrastDialog(QDialog):
         self.viewer.renderer.set_clim(c_idx, vmin, vmax)
         self.viewer.canvas.update()
 
-    def auto_contrast(self):
+    def reset_auto_contrast(self):
+        """Reset to default robust percentiles."""
+        self.pct_low = 0.5
+        self.pct_high = 99.98
+        self.apply_auto_contrast()
+
+    def adjust_contrast(self, direction):
+        """
+        Adjust percentiles to tighten (+1) or loosen (-1) contrast.
+        Step size: 0.01%
+        """
+        step = 0.01
+        
+        if direction > 0: # Tighten
+            self.pct_low += step
+            self.pct_high -= step
+        else: # Loosen
+            self.pct_low -= step
+            self.pct_high += step
+            
+        # Clamp
+        self.pct_low = max(0.0, min(self.pct_low, 49.0))
+        self.pct_high = max(51.0, min(self.pct_high, 100.0))
+        
+        self.apply_auto_contrast()
+
+    def apply_auto_contrast(self):
         c_idx = self.combo.currentIndex()
         cache = self.viewer.renderer.current_slice_cache
+
+        if self.chk_all_channels.isChecked():
+            # Apply to all channels
+            for c_idx in range(self.combo.count()):
+                plane = cache[c_idx]
+                # Ignore zeros (background)
+                valid_data = plane[plane > 0]
+                if valid_data.size == 0:
+                    valid_data = plane # Fallback if all zeros
+                
+                mn, mx = map(float, np.nanpercentile(valid_data, (self.pct_low, self.pct_high)))
+                
+                # Update Renderer
+                self.viewer.renderer.set_clim(c_idx, mn, mx)
+                
+                # Update Widget
+                self.hist_widget.blockSignals(True)
+                self.hist_widget.set_clim(mn, mx)
+                self.hist_widget.blockSignals(False)   
+            self.viewer.canvas.update() 
+            return
+        
         if cache is not None:
             plane = cache[c_idx]
-            mn, mx = float(np.nanmin(plane)), float(np.nanmax(plane))
+            # Ignore zeros (background)
+            valid_data = plane[plane > 0]
+            if valid_data.size == 0:
+                valid_data = plane # Fallback if all zeros
+            
+            mn, mx = map(float, np.nanpercentile(valid_data, (self.pct_low, self.pct_high)))
             
             # Update Renderer
             self.viewer.renderer.set_clim(c_idx, mn, mx)

@@ -1,11 +1,12 @@
 import json
 from qtpy.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QPushButton, 
-    QLabel, QFileDialog, QListWidgetItem, QComboBox
+    QLabel, QFileDialog, QListWidgetItem, QComboBox, QMenuBar, QAction
 )
 from qtpy.QtCore import Qt
 from .manager import manager
 from .rois import CoordinateROI, RectangleROI, CircleROI, LineROI
+from .analysis import plot_profile, crop_image, measure_intensity
 
 class ROIManager(QWidget):
     def __init__(self):
@@ -46,9 +47,24 @@ class ROIManager(QWidget):
         
         self.layout.addLayout(btn_layout)
         
-        # Analysis (Placeholder)
-        self.btn_measure = QPushButton("Measure (Placeholder)")
-        self.layout.addWidget(self.btn_measure)
+        # Menu Bar
+        self.menu_bar = QMenuBar()
+        self.layout.setMenuBar(self.menu_bar)
+        
+        # Analysis Menu
+        analysis_menu = self.menu_bar.addMenu("Analysis")
+        
+        action_profile = QAction("Plot Profile", self)
+        action_profile.triggered.connect(lambda: self.run_analysis(plot_profile))
+        analysis_menu.addAction(action_profile)
+        
+        action_crop = QAction("Crop Image", self)
+        action_crop.triggered.connect(lambda: self.run_analysis(crop_image))
+        analysis_menu.addAction(action_crop)
+        
+        action_measure = QAction("Measure Intensity", self)
+        action_measure.triggered.connect(lambda: self.run_analysis(measure_intensity))
+        analysis_menu.addAction(action_measure)
 
     def refresh_windows(self):
         """Populate the window combo box."""
@@ -156,6 +172,72 @@ class ROIManager(QWidget):
         self.refresh_list()
         self.active_window.canvas.update()
 
+    def run_analysis(self, func):
+        item = self.roi_list.currentItem()
+        if not item or not self.active_window:
+            print("No ROI selected")
+            return
+            
+        roi = item.data(Qt.UserRole)
+        
+        # Prepare Data
+        # For profile/measure, we usually want the CURRENT slice (2D)
+        # For crop, we might want 5D?
+        # Let's check the function signature or just pass what makes sense.
+        # The analysis functions currently handle 2D or 5D checks.
+        
+        # Get 5D data
+        data_5d = self.active_window.img_data
+        
+        # Get 2D slice
+        # We need to access the cache or slice it manually using window indices
+        t = self.active_window.t_idx
+        z = self.active_window.z_idx
+        # Handle Z-slice (projection) if active?
+        # If projection is active, z is a slice.
+        # The proxy handles it.
+        
+        # But wait, `img_data` is the proxy or array.
+        # If we want the VISIBLE image (e.g. projected), we should slice it.
+        # If we pass the whole 5D proxy to `crop`, it works.
+        # If we pass 5D to `plot_profile`, it fails (expects 2D).
+        
+        # Let's try to pass the appropriate data.
+        if func == crop_image:
+            # Pass full data
+            func(data_5d, roi)
+        else:
+            # Pass current slice (2D)
+            # We can use the renderer's cache if available, or slice the proxy.
+            # Renderer cache is (C, Y, X) or (Y, X).
+            # If Composite, it's (C, Y, X). Profile needs 2D.
+            # Let's use the active channel if composite.
+            
+            # Slice manually to be safe
+            # We need to handle the Z-slice logic from UI?
+            # The UI constructs a slice for Z if projection is on.
+            # But here we don't have easy access to that logic without duplicating it.
+            # Let's just use the current z_idx (int) for now, or ask the window?
+            
+            # Actually, let's just grab what's in the renderer cache?
+            cache = self.active_window.renderer.current_slice_cache
+            if cache is None:
+                print("No image data available")
+                return
+                
+            # cache is (C, Y, X) or (Y, X)
+            if cache.ndim == 3:
+                # Use active channel
+                c = self.active_window.c_idx
+                if c < cache.shape[0]:
+                    data_2d = cache[c]
+                else:
+                    data_2d = cache[0] # Fallback
+            else:
+                data_2d = cache
+                
+            func(data_2d, roi)
+
 # Global instance
 _roi_manager_instance = None
 
@@ -164,3 +246,5 @@ def get_roi_manager():
     if _roi_manager_instance is None:
         _roi_manager_instance = ROIManager()
     return _roi_manager_instance
+
+

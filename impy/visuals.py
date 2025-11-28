@@ -22,9 +22,9 @@ class CompositeImageVisual:
         self.channel_clims = {}
         self.channel_gammas = {}
         self.channel_colors = [
-            "red",
-            "green",
-            "blue",
+            "#ffb100",
+            "#49FF49",
+            "#5BD6FF",
             "magenta",
             "cyan",
             "yellow",
@@ -64,9 +64,9 @@ class CompositeImageVisual:
 
             # Force Additive Blending
             image_visual.set_gl_state(
-                preset="additive",
+                preset="translucent",
                 blend=True,
-                blend_func=("src_alpha", "one"),
+                blend_func=("one", "one"),
                 depth_test=False,
             )
 
@@ -90,7 +90,7 @@ class CompositeImageVisual:
                 layer.visible = True
                 layer.set_gl_state(
                     blend=True,
-                    blend_func=("src_alpha", "one"),
+                    blend_func=("one", "one"),
                     depth_test=False,
                 )
             else:
@@ -121,14 +121,20 @@ class CompositeImageVisual:
 
                 # Check for "Suspiciously Default" limits vs "Real Data"
                 if dtype == np.uint16 and current_clim == (0, 65535):
-                    mx = np.nanmax(plane)
-                    # If data uses less than 10% of dynamic range, auto-scale
-                    if mx < 6000:
-                        self.set_clim(c, 0, max(mx, 1))
+                    # Use percentiles for robustness against outliers
+                    # Ignore zeros (background/padding) for more accurate contrast
+                    valid_data = plane[plane > 0]
+                    if valid_data.size > 0:
+                        mn, mx = np.nanpercentile(valid_data, (0.1, 99.9))
+                        # If data uses less than 10% of dynamic range, auto-scale
+                        if mx < 6000:
+                            self.set_clim(c, mn, max(mx, 1))
 
                 elif dtype.kind == "f" and current_clim == (0.0, 1.0):
-                    mn, mx = np.nanmin(plane), np.nanmax(plane)
-                    self.set_clim(c, mn, mx)
+                    valid_data = plane[plane > 0]
+                    if valid_data.size > 0:
+                        mn, mx = np.nanpercentile(valid_data, (0.1, 99.9))
+                        self.set_clim(c, mn, mx)
 
         self._update_visibility()
 

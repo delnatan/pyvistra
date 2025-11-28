@@ -252,6 +252,10 @@ class RectangleROI(ROI):
         cx = x + w / 2
         cy = y + h / 2
         
+        # Ensure non-zero width/height to avoid Vispy errors
+        w = max(w, 1e-6)
+        h = max(h, 1e-6)
+        
         self.rect.center = (cx, cy, 0)
         self.rect.width = w
         self.rect.height = h
@@ -369,7 +373,7 @@ class CircleROI(ROI):
         self.data = {"center": p1, "edge": p2}
         
         self.circle.center = (cx, cy, 0)
-        self.circle.radius = radius
+        self.circle.radius = max(radius, 1e-6)
         
         if self.selected:
             self._update_handles()

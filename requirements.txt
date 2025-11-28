@@ -5,3 +5,5 @@ PyQt6
 tifffile
 h5py
 superqt
+magicgui
+matplotlib
