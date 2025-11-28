@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "impy"
+version = "0.1.0"
+description = "Image analysis and ROI management tool"
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "numpy",
+    "vispy",
+    "qtpy",
+    "PyQt6",
+    "tifffile",
+    "h5py",
+    "superqt",
+    "magicgui",
+    "matplotlib",
+]
+
+[project.scripts]
+impy = "impy.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["impy*"]
