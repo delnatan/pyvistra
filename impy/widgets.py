@@ -74,7 +74,9 @@ class HistogramWidget(QWidget):
         span = self.data_max - self.data_min
         if span <= 0: return 0
         ratio = (val - self.data_min) / span
-        return int(ratio * w)
+        x = int(ratio * w)
+        # Clamp to 32-bit signed integer range to prevent Qt OverflowError
+        return max(-2147483648, min(x, 2147483647))
 
     def _x_to_val(self, x):
         w = self.width()
