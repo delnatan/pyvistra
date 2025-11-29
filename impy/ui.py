@@ -25,7 +25,7 @@ from qtpy.QtWidgets import (
 from superqt import QRangeSlider
 from vispy import app, scene
 
-from .io import load_image
+from .io import load_image, Numpy5DProxy
 from .visuals import CompositeImageVisual
 from .widgets import ContrastDialog, MetadataDialog
 from .manager import manager
@@ -599,6 +599,9 @@ def imshow(data, title="Image"):
     elif data.ndim == 4:
         # Assume (Z, C, Y, X)
         data = data[np.newaxis, :, :, :, :]
+        
+    # Wrap in Proxy to support Z-Projection slicing
+    data = Numpy5DProxy(data)
         
     viewer = ImageWindow(data, title=title)
     viewer.show()

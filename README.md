@@ -89,3 +89,25 @@ for t in range(n_timepoints):
 
 print(f"Projected shape: {timelapse_max_proj.shape}")
 ```
+
+### Using Numpy5DProxy with Arrays
+
+If you have a raw numpy array (e.g., from another source) and want to use the convenient slicing-based max projection, you can wrap it in `Numpy5DProxy`.
+
+```python
+import numpy as np
+from impy.io import Numpy5DProxy
+
+# Create or load your 5D array (T, Z, C, Y, X)
+# Example: 10 timepoints, 20 z-slices, 2 channels, 512x512
+data = np.random.randint(0, 255, (10, 20, 2, 512, 512), dtype=np.uint8)
+
+# Wrap it in the proxy
+proxy = Numpy5DProxy(data)
+
+# Now you can slice the Z-dimension to get max projections on the fly
+# Get max projection of timepoint 0, channel 0
+# The slice ':' for Z triggers the projection
+proj = proxy[0, :, 0] 
+print(f"Projected shape: {proj.shape}") # (512, 512)
+```
