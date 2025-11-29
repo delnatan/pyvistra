@@ -25,7 +25,7 @@ from qtpy.QtWidgets import (
 from superqt import QRangeSlider
 from vispy import app, scene
 
-from .io import load_image, Numpy5DProxy
+from .io import load_image, Numpy5DProxy, normalize_to_5d
 from .visuals import CompositeImageVisual
 from .widgets import ContrastDialog, MetadataDialog
 from .manager import manager
@@ -50,7 +50,15 @@ class ImageWindow(QMainWindow):
             filename = self.meta.get("filename", "Image")
         else:
             self.filepath = None
-            self.img_data = data_or_path
+            # Normalize raw data using helper
+            # Note: ImageWindow doesn't take 'dims' arg directly yet, 
+            # but usually it's called via imshow which does.
+            # If instantiated directly, we use default heuristics (dims=None).
+            if not isinstance(data_or_path, Numpy5DProxy):
+                 self.img_data = normalize_to_5d(data_or_path)
+            else:
+                 self.img_data = data_or_path
+                 
             self.meta = {}
             filename = title
 
@@ -587,9 +595,15 @@ class Toolbar(QMainWindow):
             print(f"Error opening {filepath}: {e}")
 
 
-def imshow(data, title="Image"):
+def imshow(data, title="Image", dims=None):
     """
     Convenience function to show an image from a numpy array.
+    
+    Args:
+        data (np.ndarray): Image data.
+        title (str): Window title.
+        dims (str): Dimension order string (e.g. 'tyx', 'zcyx'). 
+                    If None, heuristics are used.
     """
     # Ensure QApplication exists
     app = QApplication.instance()
@@ -597,26 +611,7 @@ def imshow(data, title="Image"):
         app = QApplication(sys.argv)
     
     # Normalize data to 5D (T, Z, C, Y, X)
-    # Heuristics for common shapes:
-    # 2D: (Y, X) -> (1, 1, 1, Y, X)
-    # 3D: (Z, Y, X) -> (1, Z, 1, Y, X) ?? Or (C, Y, X)? Ambiguous.
-    # Let's assume (Z, Y, X) for 3D if not specified.
-    # 4D: (Z, C, Y, X) -> (1, Z, C, Y, X)
-    
-    # For simplicity, let's just wrap it if needed, or rely on user to provide correct shape?
-    # Better to be robust.
-    
-    if data.ndim == 2:
-        data = data[np.newaxis, np.newaxis, np.newaxis, :, :]
-    elif data.ndim == 3:
-        # Assume (Z, Y, X)
-        data = data[np.newaxis, :, np.newaxis, :, :]
-    elif data.ndim == 4:
-        # Assume (Z, C, Y, X)
-        data = data[np.newaxis, :, :, :, :]
-        
-    # Wrap in Proxy to support Z-Projection slicing
-    data = Numpy5DProxy(data)
+    data = normalize_to_5d(data, dims=dims)
         
     viewer = ImageWindow(data, title=title)
     viewer.show()

@@ -148,6 +148,62 @@ class Numpy5DProxy:
         return self.array[key]
 
 
+
+def normalize_to_5d(data, dims=None):
+    """
+    Normalizes a numpy array to (T, Z, C, Y, X) format.
+    
+    Args:
+        data (np.ndarray): Input array.
+        dims (str): Optional dimension string (e.g. 'tyx', 'zcyx').
+                    If None, heuristics are used.
+                    
+    Returns:
+        Numpy5DProxy: Wrapped data.
+    """
+    if not isinstance(data, np.ndarray):
+        raise ValueError("Input must be a numpy array")
+
+    final_img = data
+    
+    if dims:
+        dims = dims.lower()
+        if len(dims) != data.ndim:
+            raise ValueError(f"dims string length ({len(dims)}) must match data ndim ({data.ndim})")
+            
+        # Target: t, z, c, y, x
+        target_order = ['t', 'z', 'c', 'y', 'x']
+        
+        present_dims = [d for d in target_order if d in dims]
+        perm = [dims.index(d) for d in present_dims]
+        
+        final_img = np.transpose(data, perm)
+        
+        # Calculate target shape
+        target_shape = []
+        for char in target_order:
+            if char in dims:
+                target_shape.append(data.shape[dims.index(char)])
+            else:
+                target_shape.append(1)
+        
+        final_img = final_img.reshape(target_shape)
+
+    else:
+        # Heuristics
+        ndim = data.ndim
+        if ndim == 2:  # (Y, X) -> (1, 1, 1, Y, X)
+            final_img = data[np.newaxis, np.newaxis, np.newaxis, :, :]
+        elif ndim == 3:  # Assume (Z, Y, X) -> (1, Z, 1, Y, X)
+            final_img = data[np.newaxis, :, np.newaxis, :, :]
+        elif ndim == 4:  # Assume (Z, C, Y, X) -> (1, Z, C, Y, X)
+            final_img = data[np.newaxis, :, :, :, :]
+        elif ndim == 5:  # Assume (T, Z, C, Y, X)
+            final_img = data
+
+    return Numpy5DProxy(final_img)
+
+
 def load_image(filepath, use_memmap=True):
     """
     Loads an image and normalizes it to (T, Z, C, Y, X).
