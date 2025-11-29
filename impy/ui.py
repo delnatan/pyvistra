@@ -201,6 +201,21 @@ class ImageWindow(QMainWindow):
         self.contrast_dialog.raise_()
         self.contrast_dialog.refresh_ui()
 
+    def set_tool(self, tool_name):
+        """
+        Set the active tool (e.g. 'pointer', 'rect', 'circle', 'line', 'coordinate').
+        """
+        valid_tools = ["pointer", "coordinate", "rect", "circle", "line"]
+        if tool_name not in valid_tools:
+            print(f"Invalid tool: {tool_name}. Valid tools: {valid_tools}")
+            return
+
+        manager.active_tool = tool_name
+        
+        # Update cursors in all windows
+        for w in manager.get_all().values():
+            w.update_cursor()
+
     def _setup_controls(self):
         # -- Mode Selector (Only if Multi-channel) --
         if self.C > 1:

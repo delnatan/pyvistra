@@ -103,6 +103,15 @@ class CompositeImageVisual:
             print(f"Error slicing data: {e}")
             return
 
+        # Handle Z-Stack Projection
+        # If z_idx is a slice, volume_slice will be (Z, C, Y, X) or (Z, Y, X)
+        # We need to project it to (C, Y, X) or (Y, X)
+        if volume_slice.ndim == 4: # (Z, C, Y, X)
+            volume_slice = np.max(volume_slice, axis=0)
+        elif volume_slice.ndim == 3 and isinstance(z_idx, slice): # (Z, Y, X) -> (Y, X)
+             # Ambiguous if C=Z? But if z_idx is slice, dim 0 is Z.
+             volume_slice = np.max(volume_slice, axis=0)
+
         if volume_slice.ndim == 2:
             volume_slice = volume_slice[np.newaxis, :, :]
 
