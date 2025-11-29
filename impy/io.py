@@ -24,7 +24,6 @@ class Imaris5DProxy:
     def __getitem__(self, key):
         """
         Intercepts slicing: data[t, z, c, y, x]
-        Vispy usually requests: data[t_idx, z_idx, :, :, :]
         """
         # Ensure key is a tuple
         if not isinstance(key, tuple):
@@ -36,64 +35,89 @@ class Imaris5DProxy:
 
         t_idx, z_idx, c_idx, y_idx, x_idx = key
 
-        # Resolve T and Z to integers (Visuals only request single planes)
-        t = t_idx if isinstance(t_idx, int) else 0
-        # z = z_idx if isinstance(z_idx, int) else 0  <-- OLD BUGGY LINE
-        # We now support slices for Z
-        z = z_idx
+        # --- Handle Time Slicing ---
+        if isinstance(t_idx, slice):
+            # Iterate over timepoints
+            start, stop, step = t_idx.indices(self.shape[0])
+            t_indices = range(start, stop, step)
+            
+            if len(t_indices) == 0:
+                # Return empty array with correct dimensionality
+                # We need to know the shape of the rest to return correct empty
+                # Let's just return empty of 5D?
+                # Shape: (0, Z', C', Y', X')
+                # It's complex to calculate exact shape without reading.
+                # Simplified: return empty array
+                return np.empty((0,) + self.shape[1:], dtype=self.dtype)
 
-    # --- Handle Channel Slicing ---
-        # If c_idx is a slice (e.g. :), we must read multiple channels and stack them.
+            stack = []
+            for t in t_indices:
+                stack.append(self._read_timepoint(t, z_idx, c_idx))
+            
+            # Stack along Time (axis 0)
+            # Result: (T, ...)
+            data = np.array(stack)
+            
+            # Apply Y/X slicing
+            # data is (T, Z, C, Y, X) or (T, C, Y, X) etc.
+            # We need to apply y_idx, x_idx to the last two dimensions
+            return data[..., y_idx, x_idx]
+            
+        else:
+            # Single Timepoint
+            data = self._read_timepoint(t_idx, z_idx, c_idx)
+            return data[..., y_idx, x_idx]
+
+    def _read_timepoint(self, t, z_idx, c_idx):
+        """
+        Reads a single timepoint with Z and C slicing.
+        Returns data with shape (Z, C, Y, X) or subset.
+        """
+        # --- Handle Channel Slicing ---
         if isinstance(c_idx, slice):
-            # Calculate range of channels requested
             start, stop, step = c_idx.indices(self.shape[2])
             channels = range(start, stop, step)
-
+            
             planes = []
             for c in channels:
-                planes.append(self._read_plane(c, t, z))
+                planes.append(self._read_z_slice(c, t, z_idx))
 
             # Stack into (C, ...)
             stack = np.array(planes)
 
-            # If Z was also sliced, stack is (C, Z, Y, X).
+            # If Z was also sliced (or is full stack), stack is (C, Z, Y, X).
             # We want (Z, C, Y, X).
-            if isinstance(z, slice):
-                stack = np.transpose(stack, (1, 0, 2, 3))
-
-            # Apply Y and X slicing to the stack
-            # Note: stack is (C, Y, X) or (Z, C, Y, X)
-            # If (Z, C, Y, X), we apply y_idx to dim 2, x_idx to dim 3
+            # If z_idx was int, stack is (C, Y, X) -> No transpose needed.
             if stack.ndim == 4:
-                return stack[:, :, y_idx, x_idx]
-            else:
-                return stack[:, y_idx, x_idx]
+                stack = np.transpose(stack, (1, 0, 2, 3))
+            
+            return stack
 
         else:
-            # Single channel requested
-            c = c_idx
-            data_plane = self._read_plane(c, t, z)
-            return data_plane[y_idx, x_idx]
+            # Single channel
+            return self._read_z_slice(c_idx, t, z_idx)
 
-    def _read_plane(self, c, t, z):
+    def _read_z_slice(self, c, t, z):
         """
-        Helper to read a single plane or a Z-projection.
-        z can be an int or a slice.
+        Helper to read Z-slice/stack for specific C and T.
+        Optimized to use full-volume read if z is full slice.
         """
         if isinstance(z, slice):
-            # Z-Stack
             start, stop, step = z.indices(self.shape[1])
             z_indices = range(start, stop, step)
             
+            # Optimization: If full Z-stack requested (step=1 and full range)
+            if step == 1 and start == 0 and stop == self.shape[1]:
+                 return self.reader.read(c=c, t=t, z=None)
+
             if len(z_indices) == 0:
                 return np.zeros((0, self.shape[3], self.shape[4]), dtype=self.dtype)
 
-            # Read all planes in range
+            # Read specific planes
             stack = []
             for z_i in z_indices:
                 stack.append(self.reader.read(c=c, t=t, z=z_i))
             
-            # Return stack (Z, Y, X)
             return np.array(stack)
         else:
             return self.reader.read(c=c, t=t, z=z)
