@@ -257,3 +257,45 @@ def load_image(filepath, use_memmap=True):
         "shape": final_img.shape,
         "scale": scale,
     }
+
+
+def save_tiff(filepath, data, scale=(1.0, 1.0, 1.0), axes="TZCYX"):
+    """
+    Saves a 5D array to a TIFF file with metadata.
+    
+    Args:
+        filepath (str): Output path.
+        data (array-like): 5D data (T, Z, C, Y, X).
+        scale (tuple): Voxel size (z, y, x).
+        axes (str): Dimension order.
+    """
+    # Ensure data is numpy array (loads into memory)
+    # If it's a proxy, slicing [:] triggers reading.
+    # We use np.asarray to avoid copying if it's already an array
+    try:
+        image = np.asarray(data[:])
+    except TypeError:
+         # Fallback if slicing not supported directly or data is list
+        image = np.asarray(data)
+
+    sz, sy, sx = scale
+    
+    # Resolution (pixels per unit)
+    # If unit is 'um', then 1/sx.
+    # Avoid division by zero
+    rx = 1.0 / sx if sx > 0 else 1.0
+    ry = 1.0 / sy if sy > 0 else 1.0
+    
+    metadata = {
+        'axes': axes,
+        'spacing': sz,
+        'unit': 'um',
+    }
+    
+    tifffile.imwrite(
+        filepath,
+        image,
+        imagej=True,
+        resolution=(rx, ry),
+        metadata=metadata
+    )

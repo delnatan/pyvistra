@@ -1,3 +1,8 @@
+"""
+I started this file to familiarize myself with VisPy's coordinate system
+when working with scaled images.
+"""
+
 import sys
 
 import numpy as np
