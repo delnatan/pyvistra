@@ -235,6 +235,12 @@ class RectangleROI(ROI):
             border_color="yellow", color=(1, 1, 0, 0.1),
             parent=self.view.scene
         )
+        self.rect.set_gl_state(
+            preset="translucent",
+            blend=True,
+            blend_func=("src_alpha", "one_minus_src_alpha"),
+            depth_test=False
+        )
         self.visuals.append(self.rect)
 
     def update(self, p1, p2):
@@ -360,6 +366,12 @@ class CircleROI(ROI):
             center=(0, 0, 0), radius=1,
             border_color="cyan", color=(0, 1, 1, 0.1),
             parent=self.view.scene
+        )
+        self.circle.set_gl_state(
+            preset="translucent",
+            blend=True,
+            blend_func=("src_alpha", "one_minus_src_alpha"),
+            depth_test=False
         )
         self.visuals.append(self.circle)
 

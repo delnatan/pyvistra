@@ -10,17 +10,14 @@ from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QSlider,
-    QSpinBox,
     QVBoxLayout,
     QHBoxLayout,
     QWidget,
     QToolBar,
-    QButtonGroup,
 )
 from superqt import QRangeSlider
 from vispy import app, scene
@@ -30,7 +27,9 @@ from .visuals import CompositeImageVisual
 from .widgets import ContrastDialog, MetadataDialog
 from .manager import manager
 from .rois import CoordinateROI, RectangleROI, CircleROI, LineROI
+from .rois import CoordinateROI, RectangleROI, CircleROI, LineROI
 from .roi_manager import get_roi_manager
+from .ortho import OrthoViewer
 
 try:
     app.use_app(API_NAME)
@@ -190,10 +189,18 @@ class ImageWindow(QMainWindow):
         info_action.setShortcut("Shift+I")
         info_action.triggered.connect(self.show_metadata_dialog)
         image_menu.addAction(info_action)
+        
+        ortho_action = QAction("Ortho View", self)
+        ortho_action.triggered.connect(self.show_ortho_view)
+        image_menu.addAction(ortho_action)
 
     def show_metadata_dialog(self):
         dlg = MetadataDialog(self.meta, parent=self)
         dlg.exec_()
+
+    def show_ortho_view(self):
+        self.ortho_viewer = OrthoViewer(self.img_data, self.meta, title=f"Ortho View - {self.windowTitle()}")
+        self.ortho_viewer.show()
 
     def update_cursor(self):
         tool = manager.active_tool

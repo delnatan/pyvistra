@@ -9,9 +9,10 @@ class CompositeImageVisual:
     multi-channel rendering using additive blending.
     """
 
-    def __init__(self, view, image_data):
+    def __init__(self, view, image_data, scale=(1.0, 1.0)):
         self.data = image_data
         self.view = view
+        self.scale = scale # (sy, sx)
         self.layers = []
 
         # State
@@ -61,6 +62,13 @@ class CompositeImageVisual:
                 method="auto",
                 interpolation="nearest",
             )
+            
+            # Apply Scale
+            # Note: Vispy Image visual expects (x, y) scale, but our input is usually (y, x)
+            # if we follow numpy convention.
+            # self.scale is (sy, sx). STTransform takes (sx, sy).
+            sy, sx = self.scale
+            image_visual.transform = scene.transforms.STTransform(scale=(sx, sy))
 
             # Force Additive Blending
             image_visual.set_gl_state(
@@ -165,5 +173,6 @@ class CompositeImageVisual:
 
     def reset_camera(self, shape):
         _, _, _, Y, X = shape
-        self.view.camera.rect = (0, 0, X, Y)
+        sy, sx = self.scale
+        self.view.camera.rect = (0, 0, X * sx, Y * sy)
         self.view.camera.flip = (False, True, False)

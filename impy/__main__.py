@@ -2,7 +2,6 @@ import sys
 
 from qtpy.QtWidgets import QApplication
 
-from impy.styles import DARK_THEME
 from impy.ui import Toolbar
 
 
