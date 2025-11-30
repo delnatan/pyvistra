@@ -157,13 +157,38 @@ class OrthoViewer(QMainWindow):
         
         # Grid for Views
         self.grid = QGridLayout()
-        self.grid.setSpacing(2)
+        self.grid.setSpacing(0)
         self.main_layout.addLayout(self.grid, 1)
+
+        # Calculate physical dimensions for layout stretches
+        phys_x = int(self.X * sx)
+        phys_y = int(self.Y * sy)
+        phys_z = int(self.Z * sz)
+        
+        # Ensure at least 1 to avoid errors
+        phys_x = max(1, phys_x)
+        phys_y = max(1, phys_y)
+        phys_z = max(1, phys_z)
+        
+        # Set stretches
+        # Col 0: X, Col 1: Z
+        self.grid.setColumnStretch(0, phys_x)
+        self.grid.setColumnStretch(1, phys_z)
+        
+        # Row 0: Y, Row 1: Z
+        self.grid.setRowStretch(0, phys_y)
+        self.grid.setRowStretch(1, phys_z)
+
+        # Enforce minimum size for side views to avoid "unusable thinness"
+        # when Z dimension is very small relative to X/Y.
+        self.grid.setColumnMinimumWidth(1, 150)
+        self.grid.setRowMinimumHeight(1, 150)
 
         # -- 1. Create Canvases --
         # YX View (Top-Left)
         self.canvas_yx = scene.SceneCanvas(keys=None, bgcolor="black")
         self.view_yx = self.canvas_yx.central_widget.add_view()
+        self.view_yx.padding = 0
         self.view_yx.camera = "panzoom"
         self.view_yx.camera.aspect = 1
         self.grid.addWidget(self.canvas_yx.native, 0, 0)
@@ -171,6 +196,7 @@ class OrthoViewer(QMainWindow):
         # ZY View (Top-Right) - Rotated: Y vertical, Z horizontal
         self.canvas_zy = scene.SceneCanvas(keys=None, bgcolor="black")
         self.view_zy = self.canvas_zy.central_widget.add_view()
+        self.view_zy.padding = 0
         self.view_zy.camera = "panzoom"
         self.view_zy.camera.aspect = 1
         self.grid.addWidget(self.canvas_zy.native, 0, 1)
@@ -178,6 +204,7 @@ class OrthoViewer(QMainWindow):
         # ZX View (Bottom-Left) - Rotated: Z vertical, X horizontal
         self.canvas_zx = scene.SceneCanvas(keys=None, bgcolor="black")
         self.view_zx = self.canvas_zx.central_widget.add_view()
+        self.view_zx.padding = 0
         self.view_zx.camera = "panzoom"
         self.view_zx.camera.aspect = 1
         self.grid.addWidget(self.canvas_zx.native, 1, 0)
