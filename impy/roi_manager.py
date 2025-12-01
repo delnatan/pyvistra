@@ -1,7 +1,8 @@
 import json
 from qtpy.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QPushButton, 
-    QLabel, QFileDialog, QListWidgetItem, QComboBox, QMenuBar, QAction
+    QLabel, QFileDialog, QListWidgetItem, QComboBox, QMenuBar, QAction,
+    QSizePolicy
 )
 from qtpy.QtCore import Qt
 from .manager import manager
@@ -21,6 +22,9 @@ class ROIManager(QWidget):
         win_layout = QHBoxLayout()
         win_layout.addWidget(QLabel("Window:"))
         self.window_combo = QComboBox()
+        self.window_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.window_combo.setMinimumContentsLength(10)
+        self.window_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.window_combo.currentIndexChanged.connect(self.on_window_combo_changed)
         win_layout.addWidget(self.window_combo)
         self.layout.addLayout(win_layout)
@@ -156,13 +160,13 @@ class ROIManager(QWidget):
         for item in data:
             cls_name = item["type"]
             if cls_name == "CoordinateROI":
-                roi = CoordinateROI(self.active_window.view, name=item["name"])
+                roi = CoordinateROI(self.active_window, name=item["name"])
             elif cls_name == "RectangleROI":
-                roi = RectangleROI(self.active_window.view, name=item["name"])
+                roi = RectangleROI(self.active_window, name=item["name"])
             elif cls_name == "CircleROI":
-                roi = CircleROI(self.active_window.view, name=item["name"])
+                roi = CircleROI(self.active_window, name=item["name"])
             elif cls_name == "LineROI":
-                roi = LineROI(self.active_window.view, name=item["name"])
+                roi = LineROI(self.active_window, name=item["name"])
             else:
                 continue
                 
