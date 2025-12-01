@@ -131,8 +131,28 @@ class ROIManager(QWidget):
         self.active_window.canvas.update()
 
     def on_item_clicked(self, item):
-        # Highlight logic could go here
-        pass
+        if not self.active_window:
+            return
+            
+        roi = item.data(Qt.UserRole)
+        for r in self.active_window.rois:
+            r.select(r is roi)
+        self.active_window.canvas.update()
+
+    def select_roi(self, roi):
+        """Select the item corresponding to the given ROI."""
+        self.roi_list.blockSignals(True) # Prevent recursion if itemClicked triggers something
+        found = False
+        for i in range(self.roi_list.count()):
+            item = self.roi_list.item(i)
+            if item.data(Qt.UserRole) == roi:
+                self.roi_list.setCurrentItem(item)
+                found = True
+                break
+        
+        if not found:
+            self.roi_list.clearSelection()
+        self.roi_list.blockSignals(False)
 
     def save_rois(self):
         if not self.active_window:

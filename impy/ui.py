@@ -154,6 +154,13 @@ class ImageWindow(QMainWindow):
         if event.key() == Qt.Key_A:
             self.renderer.reset_camera(self.img_data.shape)
             self.canvas.update()
+        elif event.key() == Qt.Key_F:
+            # Flip selected CoordinateROI
+            for roi in self.rois:
+                if roi.selected and isinstance(roi, CoordinateROI):
+                    roi.flip()
+                    self.canvas.update()
+                    break
         else:
             super().keyPressEvent(event)
 
@@ -389,6 +396,9 @@ class ImageWindow(QMainWindow):
             # Update Selection
             for roi in self.rois:
                 roi.select(roi is hit_roi)
+            
+            # Notify Manager
+            get_roi_manager().select_roi(hit_roi)
                 
             if hit_roi:
                 self.dragging_roi = hit_roi

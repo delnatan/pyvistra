@@ -86,6 +86,7 @@ class CoordinateROI(ROI):
         super().__init__(view, name)
         self.origin = None
         self.vector = None
+        self.flipped = False
         
         # Visuals
         self.line = scene.visuals.Line(
@@ -97,7 +98,9 @@ class CoordinateROI(ROI):
         )
         self.marker = scene.visuals.Markers(
             pos=np.zeros((1, 3)),
-            face_color="yellow",
+            symbol="x",
+            edge_color="blue",
+            edge_width=2,
             size=8,
             parent=self.view.scene
         )
@@ -123,7 +126,11 @@ class CoordinateROI(ROI):
         self.vector = anterior_vec # Keep for compatibility if needed, but prefer specific names
         
         # Orthogonal vector (Dorsal) (-y, x)
-        dorsal_vec = np.array([-anterior_vec[1], anterior_vec[0]])
+        # If flipped, we negate it (or just rotate the other way)
+        if self.flipped:
+            dorsal_vec = np.array([anterior_vec[1], -anterior_vec[0]])
+        else:
+            dorsal_vec = np.array([-anterior_vec[1], anterior_vec[0]])
         
         # Calculate end points
         anterior_end = self.origin + anterior_vec
@@ -133,7 +140,8 @@ class CoordinateROI(ROI):
         self.data = {
             "origin": p1, 
             "anterior": tuple(anterior_end),
-            "dorsal": tuple(dorsal_end)
+            "dorsal": tuple(dorsal_end),
+            "flipped": self.flipped
         }
         
         # Dorsal Line (Green)
@@ -150,7 +158,13 @@ class CoordinateROI(ROI):
         
         marker_pos = np.zeros((1, 3))
         marker_pos[0, :2] = self.origin
-        self.marker.set_data(pos=marker_pos)
+        self.marker.set_data(
+            pos=marker_pos,
+            symbol="x",
+            edge_color="blue",
+            edge_width=2,
+            size=8
+        )
         
         if self.selected:
             self._update_handles()
@@ -158,6 +172,9 @@ class CoordinateROI(ROI):
     def _update_visuals_from_data(self):
         # Support old format ("end") and new format ("anterior")
         if "origin" in self.data:
+            # Restore state
+            self.flipped = self.data.get("flipped", False)
+            
             origin = self.data["origin"]
             if "anterior" in self.data:
                 anterior = self.data["anterior"]
@@ -165,6 +182,12 @@ class CoordinateROI(ROI):
             elif "end" in self.data:
                 # Legacy support
                 self.update(origin, self.data["end"])
+
+    def flip(self):
+        """Flip the dorsal vector direction."""
+        self.flipped = not self.flipped
+        if "origin" in self.data and "anterior" in self.data:
+            self.update(self.data["origin"], self.data["anterior"])
 
     def _update_handles(self):
         if "origin" not in self.data: return
