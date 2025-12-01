@@ -84,7 +84,7 @@ class ImageWindow(QMainWindow):
 
         # 3. Vispy Canvas
         self.canvas = scene.SceneCanvas(
-            keys="interactive", bgcolor="black", show=False
+            keys=None, bgcolor="black", show=False
         )
         self.view = self.canvas.central_widget.add_view()
         self.view.camera = "panzoom"
@@ -161,6 +161,13 @@ class ImageWindow(QMainWindow):
                     roi.flip()
                     self.canvas.update()
                     break
+        elif event.key() == Qt.Key_Escape:
+            # Deselect all ROIs
+            for roi in self.rois:
+                roi.select(False)
+            self.canvas.update()
+            # Notify Manager (optional, but good for sync)
+            get_roi_manager().select_roi(None)
         else:
             super().keyPressEvent(event)
 
