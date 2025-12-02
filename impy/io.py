@@ -229,10 +229,62 @@ def load_image(filepath, use_memmap=True):
 
     # --- TIFF PATH ---
     # Use generic generic wrapper for consistency
+    scale = (1.0, 1.0, 1.0)
+    
     if use_memmap:
         img = tifffile.memmap(filepath)
     else:
         img = tifffile.imread(filepath)
+
+    # Extract Metadata
+    try:
+        with tifffile.TiffFile(filepath) as tif:
+            # Z-spacing (ImageJ metadata)
+            ij_meta = tif.imagej_metadata
+            sz = 1.0
+            if ij_meta and 'spacing' in ij_meta:
+                sz = ij_meta['spacing']
+            
+            # XY-spacing (Tags)
+            # Resolution is usually (numerator, denominator) or float
+            # TIFF resolution is pixels per unit.
+            # We want unit per pixel (micron/pixel).
+            page = tif.pages[0]
+            sx, sy = 1.0, 1.0
+            
+            # Check Unit
+            # 1: None, 2: Inch, 3: cm
+            unit = page.tags.get('ResolutionUnit')
+            unit_val = unit.value if unit else 0
+            
+            x_res = page.tags.get('XResolution')
+            y_res = page.tags.get('YResolution')
+            
+            if x_res and y_res:
+                rx = x_res.value
+                ry = y_res.value
+                
+                # Handle tuple (num, den)
+                if isinstance(rx, tuple):
+                    rx = rx[0] / rx[1] if rx[1] != 0 else 0
+                if isinstance(ry, tuple):
+                    ry = ry[0] / ry[1] if ry[1] != 0 else 0
+                    
+                if rx > 0: sx = 1.0 / rx
+                if ry > 0: sy = 1.0 / ry
+                
+                # Convert to microns if needed
+                if unit_val == 2: # Inch
+                    sx *= 25400.0
+                    sy *= 25400.0
+                elif unit_val == 3: # cm
+                    sx *= 10000.0
+                    sy *= 10000.0
+                    
+            scale = (sz, sy, sx)
+            
+    except Exception as e:
+        print(f"Warning: Could not read TIFF metadata: {e}")
 
     ndim = img.ndim
     final_img = img
@@ -247,8 +299,6 @@ def load_image(filepath, use_memmap=True):
     elif ndim == 5:  # Assume (T, Z, C, Y, X)
         final_img = img
 
-    scale = (1.0, 1.0, 1.0)
-    
     # Wrap in Proxy
     data_proxy = Numpy5DProxy(final_img)
 

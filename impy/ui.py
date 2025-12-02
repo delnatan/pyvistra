@@ -27,7 +27,6 @@ from .visuals import CompositeImageVisual
 from .widgets import ContrastDialog, MetadataDialog
 from .manager import manager
 from .rois import CoordinateROI, RectangleROI, CircleROI, LineROI
-from .rois import CoordinateROI, RectangleROI, CircleROI, LineROI
 from .roi_manager import get_roi_manager
 from .ortho import OrthoViewer
 
@@ -633,6 +632,10 @@ def imshow(data, title="Image", dims=None):
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
+        
+    # Apply Theme
+    from .theme import DARK_THEME
+    app.setStyleSheet(DARK_THEME)
     
     # Normalize data to 5D (T, Z, C, Y, X)
     data = normalize_to_5d(data, dims=dims)
@@ -653,4 +656,6 @@ def run_app():
     """
     app = QApplication.instance()
     if app:
+        from .theme import DARK_THEME
+        app.setStyleSheet(DARK_THEME)
         app.exec_()

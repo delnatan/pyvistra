@@ -158,7 +158,21 @@ class ROIManager(QWidget):
         if not self.active_window:
             return
             
-        path, _ = QFileDialog.getSaveFileName(self, "Save ROIs", ".", "JSON Files (*.json)")
+        # Default path logic
+        default_dir = "."
+        default_name = "rois.json"
+        
+        if self.active_window.filepath:
+            import os
+            default_dir = os.path.dirname(self.active_window.filepath)
+            base_name = os.path.basename(self.active_window.filepath)
+            name_without_ext = os.path.splitext(base_name)[0]
+            default_name = f"{name_without_ext}.json"
+            
+        import os
+        default_path = os.path.join(default_dir, default_name)
+
+        path, _ = QFileDialog.getSaveFileName(self, "Save ROIs", default_path, "JSON Files (*.json)")
         if not path:
             return
             
@@ -170,7 +184,21 @@ class ROIManager(QWidget):
         if not self.active_window:
             return
             
-        path, _ = QFileDialog.getOpenFileName(self, "Load ROIs", ".", "JSON Files (*.json)")
+        # Default path logic
+        default_dir = "."
+        default_name = "rois.json"
+        
+        if self.active_window.filepath:
+            import os
+            default_dir = os.path.dirname(self.active_window.filepath)
+            base_name = os.path.basename(self.active_window.filepath)
+            name_without_ext = os.path.splitext(base_name)[0]
+            default_name = f"{name_without_ext}.json"
+            
+        import os
+        default_path = os.path.join(default_dir, default_name)
+
+        path, _ = QFileDialog.getOpenFileName(self, "Load ROIs", default_path, "JSON Files (*.json)")
         if not path:
             return
             
@@ -180,13 +208,13 @@ class ROIManager(QWidget):
         for item in data:
             cls_name = item["type"]
             if cls_name == "CoordinateROI":
-                roi = CoordinateROI(self.active_window, name=item["name"])
+                roi = CoordinateROI(self.active_window.view, name=item["name"])
             elif cls_name == "RectangleROI":
-                roi = RectangleROI(self.active_window, name=item["name"])
+                roi = RectangleROI(self.active_window.view, name=item["name"])
             elif cls_name == "CircleROI":
-                roi = CircleROI(self.active_window, name=item["name"])
+                roi = CircleROI(self.active_window.view, name=item["name"])
             elif cls_name == "LineROI":
-                roi = LineROI(self.active_window, name=item["name"])
+                roi = LineROI(self.active_window.view, name=item["name"])
             else:
                 continue
                 
