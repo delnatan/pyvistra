@@ -143,6 +143,7 @@ class ImageWindow(QMainWindow):
 
     def closeEvent(self, event):
         manager.unregister(self)
+        get_roi_manager().remove_window(self)
         super().closeEvent(event)
         
     def focusInEvent(self, event):

@@ -105,6 +105,19 @@ class ROIManager(QWidget):
         self.refresh_windows() # Ensure combo is up to date and selected
         self.refresh_list()
 
+    def remove_window(self, window):
+        """Handle window closure."""
+        if self.active_window == window:
+            self.active_window = None
+            self.setWindowTitle("ROI Manager")
+            self.roi_list.clear()
+            
+        self.refresh_windows()
+        
+        # Auto-select another window if available
+        if not self.active_window and self.window_combo.count() > 0:
+            self.window_combo.setCurrentIndex(0)
+
     def refresh_list(self):
         self.roi_list.clear()
         if not self.active_window:
