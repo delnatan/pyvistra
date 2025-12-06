@@ -40,7 +40,7 @@ class Imaris5DProxy:
             # Iterate over timepoints
             start, stop, step = t_idx.indices(self.shape[0])
             t_indices = range(start, stop, step)
-            
+
             if len(t_indices) == 0:
                 # Return empty array with correct dimensionality
                 # We need to know the shape of the rest to return correct empty
@@ -53,16 +53,16 @@ class Imaris5DProxy:
             stack = []
             for t in t_indices:
                 stack.append(self._read_timepoint(t, z_idx, c_idx))
-            
+
             # Stack along Time (axis 0)
             # Result: (T, ...)
             data = np.array(stack)
-            
+
             # Apply Y/X slicing
             # data is (T, Z, C, Y, X) or (T, C, Y, X) etc.
             # We need to apply y_idx, x_idx to the last two dimensions
             return data[..., y_idx, x_idx]
-            
+
         else:
             # Single Timepoint
             data = self._read_timepoint(t_idx, z_idx, c_idx)
@@ -77,7 +77,7 @@ class Imaris5DProxy:
         if isinstance(c_idx, slice):
             start, stop, step = c_idx.indices(self.shape[2])
             channels = range(start, stop, step)
-            
+
             planes = []
             for c in channels:
                 planes.append(self._read_z_slice(c, t, z_idx))
@@ -90,7 +90,7 @@ class Imaris5DProxy:
             # If z_idx was int, stack is (C, Y, X) -> No transpose needed.
             if stack.ndim == 4:
                 stack = np.transpose(stack, (1, 0, 2, 3))
-            
+
             return stack
 
         else:
@@ -105,19 +105,21 @@ class Imaris5DProxy:
         if isinstance(z, slice):
             start, stop, step = z.indices(self.shape[1])
             z_indices = range(start, stop, step)
-            
+
             # Optimization: If full Z-stack requested (step=1 and full range)
             if step == 1 and start == 0 and stop == self.shape[1]:
-                 return self.reader.read(c=c, t=t, z=None)
+                return self.reader.read(c=c, t=t, z=None)
 
             if len(z_indices) == 0:
-                return np.zeros((0, self.shape[3], self.shape[4]), dtype=self.dtype)
+                return np.zeros(
+                    (0, self.shape[3], self.shape[4]), dtype=self.dtype
+                )
 
             # Read specific planes
             stack = []
             for z_i in z_indices:
                 stack.append(self.reader.read(c=c, t=t, z=z_i))
-            
+
             return np.array(stack)
         else:
             return self.reader.read(c=c, t=t, z=z)
@@ -127,6 +129,7 @@ class Numpy5DProxy:
     """
     Wraps a 5D numpy array (T, Z, C, Y, X) to support Z-projection slicing.
     """
+
     def __init__(self, array):
         self.array = array
         self.shape = array.shape
@@ -143,21 +146,20 @@ class Numpy5DProxy:
             key = key + (slice(None),) * (5 - len(key))
 
         t_idx, z_idx, c_idx, y_idx, x_idx = key
-        
+
         # Standard slicing
         return self.array[key]
-
 
 
 def normalize_to_5d(data, dims=None):
     """
     Normalizes a numpy array to (T, Z, C, Y, X) format.
-    
+
     Args:
         data (np.ndarray): Input array.
         dims (str): Optional dimension string (e.g. 'tyx', 'zcyx').
                     If None, heuristics are used.
-                    
+
     Returns:
         Numpy5DProxy: Wrapped data.
     """
@@ -165,20 +167,22 @@ def normalize_to_5d(data, dims=None):
         raise ValueError("Input must be a numpy array")
 
     final_img = data
-    
+
     if dims:
         dims = dims.lower()
         if len(dims) != data.ndim:
-            raise ValueError(f"dims string length ({len(dims)}) must match data ndim ({data.ndim})")
-            
+            raise ValueError(
+                f"dims string length ({len(dims)}) must match data ndim ({data.ndim})"
+            )
+
         # Target: t, z, c, y, x
-        target_order = ['t', 'z', 'c', 'y', 'x']
-        
+        target_order = ["t", "z", "c", "y", "x"]
+
         present_dims = [d for d in target_order if d in dims]
         perm = [dims.index(d) for d in present_dims]
-        
+
         final_img = np.transpose(data, perm)
-        
+
         # Calculate target shape
         target_shape = []
         for char in target_order:
@@ -186,7 +190,7 @@ def normalize_to_5d(data, dims=None):
                 target_shape.append(data.shape[dims.index(char)])
             else:
                 target_shape.append(1)
-        
+
         final_img = final_img.reshape(target_shape)
 
     else:
@@ -230,7 +234,7 @@ def load_image(filepath, use_memmap=True):
     # --- TIFF PATH ---
     # Use generic generic wrapper for consistency
     scale = (1.0, 1.0, 1.0)
-    
+
     if use_memmap:
         img = tifffile.memmap(filepath)
     else:
@@ -242,47 +246,49 @@ def load_image(filepath, use_memmap=True):
             # Z-spacing (ImageJ metadata)
             ij_meta = tif.imagej_metadata
             sz = 1.0
-            if ij_meta and 'spacing' in ij_meta:
-                sz = ij_meta['spacing']
-            
+            if ij_meta and "spacing" in ij_meta:
+                sz = ij_meta["spacing"]
+
             # XY-spacing (Tags)
             # Resolution is usually (numerator, denominator) or float
             # TIFF resolution is pixels per unit.
             # We want unit per pixel (micron/pixel).
             page = tif.pages[0]
             sx, sy = 1.0, 1.0
-            
+
             # Check Unit
             # 1: None, 2: Inch, 3: cm
-            unit = page.tags.get('ResolutionUnit')
+            unit = page.tags.get("ResolutionUnit")
             unit_val = unit.value if unit else 0
-            
-            x_res = page.tags.get('XResolution')
-            y_res = page.tags.get('YResolution')
-            
+
+            x_res = page.tags.get("XResolution")
+            y_res = page.tags.get("YResolution")
+
             if x_res and y_res:
                 rx = x_res.value
                 ry = y_res.value
-                
+
                 # Handle tuple (num, den)
                 if isinstance(rx, tuple):
                     rx = rx[0] / rx[1] if rx[1] != 0 else 0
                 if isinstance(ry, tuple):
                     ry = ry[0] / ry[1] if ry[1] != 0 else 0
-                    
-                if rx > 0: sx = 1.0 / rx
-                if ry > 0: sy = 1.0 / ry
-                
+
+                if rx > 0:
+                    sx = 1.0 / rx
+                if ry > 0:
+                    sy = 1.0 / ry
+
                 # Convert to microns if needed
-                if unit_val == 2: # Inch
+                if unit_val == 2:  # Inch
                     sx *= 25400.0
                     sy *= 25400.0
-                elif unit_val == 3: # cm
+                elif unit_val == 3:  # cm
                     sx *= 10000.0
                     sy *= 10000.0
-                    
+
             scale = (sz, sy, sx)
-            
+
     except Exception as e:
         print(f"Warning: Could not read TIFF metadata: {e}")
 
@@ -293,7 +299,12 @@ def load_image(filepath, use_memmap=True):
     if ndim == 2:  # (Y, X) -> (1, 1, 1, Y, X)
         final_img = img[np.newaxis, np.newaxis, np.newaxis, :, :]
     elif ndim == 3:  # Assume (Z, Y, X) -> (1, Z, 1, Y, X)
-        final_img = img[np.newaxis, :, np.newaxis, :, :]
+        if img.shape[-1] == 3:
+            # most likely color image (Y, X, 3) -> (1, 1, 3, Y, X)
+            # transpose to (3, Y, X)
+            final_img = img.transpose(2, 0, 1)[np.newaxis, np.newaxis, :, :, :]
+        else:
+            final_img = img[np.newaxis, :, np.newaxis, :, :]
     elif ndim == 4:  # Assume (Z, C, Y, X) -> (1, Z, C, Y, X)
         final_img = img[np.newaxis, :, :, :, :]
     elif ndim == 5:  # Assume (T, Z, C, Y, X)
@@ -312,7 +323,7 @@ def load_image(filepath, use_memmap=True):
 def save_tiff(filepath, data, scale=(1.0, 1.0, 1.0), axes="TZCYX"):
     """
     Saves a 5D array to a TIFF file with metadata.
-    
+
     Args:
         filepath (str): Output path.
         data (array-like): 5D data (T, Z, C, Y, X).
@@ -325,27 +336,23 @@ def save_tiff(filepath, data, scale=(1.0, 1.0, 1.0), axes="TZCYX"):
     try:
         image = np.asarray(data[:])
     except TypeError:
-         # Fallback if slicing not supported directly or data is list
+        # Fallback if slicing not supported directly or data is list
         image = np.asarray(data)
 
     sz, sy, sx = scale
-    
+
     # Resolution (pixels per unit)
     # If unit is 'um', then 1/sx.
     # Avoid division by zero
     rx = 1.0 / sx if sx > 0 else 1.0
     ry = 1.0 / sy if sy > 0 else 1.0
-    
+
     metadata = {
-        'axes': axes,
-        'spacing': sz,
-        'unit': 'um',
+        "axes": axes,
+        "spacing": sz,
+        "unit": "um",
     }
-    
+
     tifffile.imwrite(
-        filepath,
-        image,
-        imagej=True,
-        resolution=(rx, ry),
-        metadata=metadata
+        filepath, image, imagej=True, resolution=(rx, ry), metadata=metadata
     )
