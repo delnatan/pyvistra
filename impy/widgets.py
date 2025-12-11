@@ -12,7 +12,9 @@ from qtpy.QtWidgets import (
     QWidget,
     QSlider,
     QDoubleSpinBox,
+    QGroupBox,
 )
+from impy.visuals import COLORMAPS
 
 # Theme Constants
 WIDGET_BG = QColor(32, 32, 32)
@@ -261,6 +263,15 @@ class ContrastDialog(QDialog):
         row1.addWidget(self.combo)
         layout.addLayout(row1)
 
+        # 1b. Colormap Selector
+        row_cmap = QHBoxLayout()
+        row_cmap.addWidget(QLabel("Colormap:"))
+        self.cmap_combo = QComboBox()
+        self.cmap_combo.addItems(list(COLORMAPS.keys()))
+        self.cmap_combo.currentTextChanged.connect(self.on_colormap_changed)
+        row_cmap.addWidget(self.cmap_combo)
+        layout.addLayout(row_cmap)
+
         # 2. Interactive Histogram
         self.hist_widget = HistogramWidget()
         self.hist_widget.climChanged.connect(self.on_clim_changed)
@@ -327,19 +338,27 @@ class ContrastDialog(QDialog):
 
         if c_idx < cache.shape[0]:
             plane = cache[c_idx]
-            
+
+            # Update Colormap Dropdown
+            cmap_name = self.viewer.renderer.get_colormap_name(c_idx)
+            self.cmap_combo.blockSignals(True)
+            idx = self.cmap_combo.findText(cmap_name)
+            if idx >= 0:
+                self.cmap_combo.setCurrentIndex(idx)
+            self.cmap_combo.blockSignals(False)
+
             # Update Histogram Data
             color = self.viewer.renderer.channel_colors[c_idx % 6]
             self.hist_widget.set_data(plane, color)
 
             # Get current clim from renderer
             curr_min, curr_max = self.viewer.renderer.get_clim(c_idx)
-            
+
             # Update widget handles without triggering signal loop
             self.hist_widget.blockSignals(True)
             self.hist_widget.set_clim(curr_min, curr_max)
             self.hist_widget.blockSignals(False)
-            
+
             # Update Gamma
             gamma = self.viewer.renderer.get_gamma(c_idx)
             self.block_gamma_signals(True)
@@ -373,6 +392,17 @@ class ContrastDialog(QDialog):
         c_idx = self.combo.currentIndex()
         self.viewer.renderer.set_clim(c_idx, vmin, vmax)
         self.viewer.canvas.update()
+
+    def on_colormap_changed(self, cmap_name):
+        c_idx = self.combo.currentIndex()
+        self.viewer.renderer.set_colormap(c_idx, cmap_name)
+        self.viewer.canvas.update()
+
+        # Update histogram color to match new colormap
+        color = self.viewer.renderer.channel_colors[c_idx % 6]
+        cache = self.viewer.renderer.current_slice_cache
+        if cache is not None and c_idx < cache.shape[0]:
+            self.hist_widget.set_data(cache[c_idx], color)
 
     def reset_auto_contrast(self):
         """Reset to default robust percentiles."""

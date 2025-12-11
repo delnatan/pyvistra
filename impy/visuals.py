@@ -1,6 +1,64 @@
 import numpy as np
 from vispy import scene
 from vispy.color import Colormap
+import matplotlib.cm as mpl_cm
+
+
+def mpl_to_vispy_colormap(name, n_colors=256):
+    """Convert a matplotlib colormap to a vispy Colormap."""
+    mpl_cmap = mpl_cm.get_cmap(name)
+    colors = mpl_cmap(np.linspace(0, 1, n_colors))
+    return Colormap(colors)
+
+
+# Available colormaps organized by category
+COLORMAPS = {
+    # Single-color colormaps (black to color) for additive blending
+    "Orange": ["black", "#ffb100"],
+    "Green": ["black", "#49FF49"],
+    "Cyan": ["black", "#5BD6FF"],
+    "Magenta": ["black", "magenta"],
+    "Yellow": ["black", "yellow"],
+    "White": ["black", "white"],
+    # Standard RGB for RGB images
+    "Red": ["black", "red"],
+    "Pure Green": ["black", "#00FF00"],
+    "Blue": ["black", "blue"],
+    # Matplotlib colormaps (perceptually uniform)
+    "viridis": "mpl:viridis",
+    "plasma": "mpl:plasma",
+    "magma": "mpl:magma",
+    "inferno": "mpl:inferno",
+    "cividis": "mpl:cividis",
+    # Other useful matplotlib colormaps
+    "hot": "mpl:hot",
+    "cool": "mpl:cool",
+    "coolwarm": "mpl:coolwarm",
+    "turbo": "mpl:turbo",
+    "gray": "mpl:gray",
+}
+
+# Default channel colormaps (original microscope colors)
+DEFAULT_CHANNEL_COLORMAPS = ["Orange", "Green", "Cyan", "Magenta", "Yellow", "White"]
+
+# Standard RGB colormaps for RGB images
+RGB_COLORMAPS = ["Red", "Pure Green", "Blue"]
+
+
+def get_colormap(name):
+    """Get a vispy Colormap by name from COLORMAPS dictionary."""
+    if name not in COLORMAPS:
+        # Fallback to white if unknown
+        return Colormap(["black", "white"]), "white"
+
+    spec = COLORMAPS[name]
+    if isinstance(spec, str) and spec.startswith("mpl:"):
+        # Matplotlib colormap
+        mpl_name = spec[4:]  # Remove "mpl:" prefix
+        return mpl_to_vispy_colormap(mpl_name), None
+    else:
+        # Simple two-color colormap
+        return Colormap(spec), spec[1]  # Return colormap and end color
 
 
 class CompositeImageVisual:
@@ -22,6 +80,9 @@ class CompositeImageVisual:
         self.current_slice_cache = None
         self.channel_clims = {}
         self.channel_gammas = {}
+        self.channel_colormaps = {}  # Maps channel index to colormap name
+
+        # Legacy color list for histogram display (derived from colormap)
         self.channel_colors = [
             "#ffb100",
             "#49FF49",
@@ -49,12 +110,18 @@ class CompositeImageVisual:
 
         for c in range(n_channels):
             if n_channels == 1:
-                color_name = "white"
+                cmap_name = "White"
             else:
-                color_name = self.channel_colors[c % len(self.channel_colors)]
+                cmap_name = DEFAULT_CHANNEL_COLORMAPS[c % len(DEFAULT_CHANNEL_COLORMAPS)]
 
-            # Additive blending: Black -> Color
-            cmap = Colormap(["black", color_name])
+            # Get colormap and associated display color
+            cmap, display_color = get_colormap(cmap_name)
+            self.channel_colormaps[c] = cmap_name
+
+            # Update legacy color list for histogram display
+            if display_color:
+                if c < len(self.channel_colors):
+                    self.channel_colors[c] = display_color
 
             image_visual = scene.visuals.Image(
                 cmap=cmap,
@@ -170,6 +237,42 @@ class CompositeImageVisual:
 
     def get_gamma(self, channel_idx):
         return self.channel_gammas.get(channel_idx, 1.0)
+
+    def set_colormap(self, channel_idx, cmap_name):
+        """Set the colormap for a specific channel by name."""
+        if channel_idx >= len(self.layers):
+            return
+
+        if cmap_name not in COLORMAPS:
+            print(f"Unknown colormap: {cmap_name}")
+            return
+
+        cmap, display_color = get_colormap(cmap_name)
+        self.layers[channel_idx].cmap = cmap
+        self.channel_colormaps[channel_idx] = cmap_name
+
+        # Update legacy color for histogram display
+        if display_color:
+            if channel_idx < len(self.channel_colors):
+                self.channel_colors[channel_idx] = display_color
+        else:
+            # For matplotlib colormaps, use a representative color
+            # Sample the colormap at 75% to get a bright representative color
+            if cmap_name in COLORMAPS:
+                spec = COLORMAPS[cmap_name]
+                if isinstance(spec, str) and spec.startswith("mpl:"):
+                    mpl_name = spec[4:]
+                    mpl_cmap = mpl_cm.get_cmap(mpl_name)
+                    rgb = mpl_cmap(0.75)[:3]
+                    hex_color = "#{:02x}{:02x}{:02x}".format(
+                        int(rgb[0] * 255), int(rgb[1] * 255), int(rgb[2] * 255)
+                    )
+                    if channel_idx < len(self.channel_colors):
+                        self.channel_colors[channel_idx] = hex_color
+
+    def get_colormap_name(self, channel_idx):
+        """Get the current colormap name for a channel."""
+        return self.channel_colormaps.get(channel_idx, "White")
 
     def reset_camera(self, shape):
         _, _, _, Y, X = shape
