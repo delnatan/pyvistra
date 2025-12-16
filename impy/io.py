@@ -29,6 +29,17 @@ class Imaris5DProxy:
         if not isinstance(key, tuple):
             key = (key,)
 
+        # Expand Ellipsis to fill missing dimensions
+        if Ellipsis in key:
+            ellipsis_idx = key.index(Ellipsis)
+            n_non_ellipsis = len(key) - 1
+            n_expand = 5 - n_non_ellipsis
+            key = (
+                key[:ellipsis_idx]
+                + (slice(None),) * n_expand
+                + key[ellipsis_idx + 1 :]
+            )
+
         # Fill missing dimensions with full slices
         if len(key) < 5:
             key = key + (slice(None),) * (5 - len(key))
@@ -141,11 +152,20 @@ class Numpy5DProxy:
         if not isinstance(key, tuple):
             key = (key,)
 
+        # Expand Ellipsis to fill missing dimensions
+        if Ellipsis in key:
+            ellipsis_idx = key.index(Ellipsis)
+            n_non_ellipsis = len(key) - 1
+            n_expand = 5 - n_non_ellipsis
+            key = (
+                key[:ellipsis_idx]
+                + (slice(None),) * n_expand
+                + key[ellipsis_idx + 1 :]
+            )
+
         # Fill missing dimensions with full slices
         if len(key) < 5:
             key = key + (slice(None),) * (5 - len(key))
-
-        t_idx, z_idx, c_idx, y_idx, x_idx = key
 
         # Standard slicing
         return self.array[key]
