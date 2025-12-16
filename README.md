@@ -93,3 +93,44 @@ from impy.io import save_tiff
 # meta['scale'] contains the voxel size (z, y, x)
 save_tiff("output.tif", volume, scale=meta['scale'])
 ```
+
+### Interactive IPython Usage
+
+`impy` can be used interactively in IPython or Jupyter notebooks. First, enable Qt event loop integration:
+
+```python
+# In IPython, enable Qt event loop integration
+%gui qt
+
+# Now you can use imshow() interactively
+import numpy as np
+from impy.ui import imshow
+
+# Create some test data
+data = np.random.rand(20, 256, 256)  # (Z, Y, X)
+
+# Display image - returns immediately, window is interactive
+viewer = imshow(data, title="Random Data", dims="zyx")
+
+# You can continue working in IPython while the viewer is open
+# Access the viewer's data
+print(viewer.img_data.shape)  # (1, 20, 1, 256, 256) - normalized to 5D
+
+# Load and display a file
+from impy.io import load_image
+data, meta = load_image('path/to/file.ims')
+viewer2 = imshow(data[0, :, 0], title="Channel 0", dims="zyx")
+```
+
+If you're running from a regular Python script (not IPython), you need to start the Qt event loop manually:
+
+```python
+from impy.ui import imshow, run_app
+import numpy as np
+
+data = np.random.rand(10, 100, 100)
+viewer = imshow(data, dims="zyx")
+
+# Start the event loop (blocks until all windows are closed)
+run_app()
+```
