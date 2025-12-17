@@ -661,11 +661,13 @@ class ChannelRow(QWidget):
     - Color swatch (clickable for colormap selection)
     - Channel name label
     - Compact histogram
+    - Gamma adjustment
     """
 
     visibilityChanged = Signal(int, bool)  # channel_idx, visible
     climChanged = Signal(int, float, float)  # channel_idx, vmin, vmax
     colormapChanged = Signal(int, str)  # channel_idx, colormap_name
+    gammaChanged = Signal(int, float)  # channel_idx, gamma
 
     def __init__(self, channel_idx, channel_name, color, parent=None):
         super().__init__(parent)
@@ -702,6 +704,21 @@ class ChannelRow(QWidget):
         self.histogram.climChanged.connect(self._on_clim_changed)
         layout.addWidget(self.histogram, 1)
 
+        # Gamma spinbox
+        gamma_label = QLabel("γ")
+        gamma_label.setStyleSheet("color: #AAA; font-size: 10px;")
+        gamma_label.setFixedWidth(10)
+        layout.addWidget(gamma_label)
+
+        self.gamma_spin = QDoubleSpinBox()
+        self.gamma_spin.setRange(0.1, 4.0)
+        self.gamma_spin.setSingleStep(0.1)
+        self.gamma_spin.setValue(1.0)
+        self.gamma_spin.setFixedWidth(55)
+        self.gamma_spin.setToolTip("Gamma correction")
+        self.gamma_spin.valueChanged.connect(self._on_gamma_changed)
+        layout.addWidget(self.gamma_spin)
+
         self.current_colormap = "White"
 
     def _update_color_swatch(self, color):
@@ -715,6 +732,9 @@ class ChannelRow(QWidget):
 
     def _on_clim_changed(self, vmin, vmax):
         self.climChanged.emit(self.channel_idx, vmin, vmax)
+
+    def _on_gamma_changed(self, value):
+        self.gammaChanged.emit(self.channel_idx, value)
 
     def _show_colormap_menu(self):
         """Show a popup menu for colormap selection."""
@@ -747,6 +767,12 @@ class ChannelRow(QWidget):
         self.chk_visible.blockSignals(True)
         self.chk_visible.setChecked(visible)
         self.chk_visible.blockSignals(False)
+
+    def set_gamma(self, gamma):
+        """Update gamma spinbox without emitting signal."""
+        self.gamma_spin.blockSignals(True)
+        self.gamma_spin.setValue(gamma)
+        self.gamma_spin.blockSignals(False)
 
 
 class ChannelPanel(QDialog):
@@ -823,6 +849,7 @@ class ChannelPanel(QDialog):
             row.visibilityChanged.connect(self._on_visibility_changed)
             row.climChanged.connect(self._on_clim_changed)
             row.colormapChanged.connect(self._on_colormap_changed)
+            row.gammaChanged.connect(self._on_gamma_changed)
 
             self.channel_rows.append(row)
             self.rows_layout.addWidget(row)
@@ -850,6 +877,11 @@ class ChannelPanel(QDialog):
 
         # Refresh histogram with new color
         self.refresh_ui()
+
+    def _on_gamma_changed(self, channel_idx, gamma):
+        """Handle gamma change for a channel."""
+        self.viewer.renderer.set_gamma(channel_idx, gamma)
+        self.viewer.canvas.update()
 
     def _auto_contrast_all(self):
         """Apply auto contrast to all channels."""
@@ -889,6 +921,10 @@ class ChannelPanel(QDialog):
                 # Update visibility state
                 visible = self.viewer.renderer.get_channel_visible(c)
                 row.set_visible_state(visible)
+
+                # Update gamma
+                gamma = self.viewer.renderer.get_gamma(c)
+                row.set_gamma(gamma)
 
 
 class MetadataDialog(QDialog):
