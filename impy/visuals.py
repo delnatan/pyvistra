@@ -81,6 +81,7 @@ class CompositeImageVisual:
         self.channel_clims = {}
         self.channel_gammas = {}
         self.channel_colormaps = {}  # Maps channel index to colormap name
+        self.channel_visibility = {}  # Maps channel index to visibility (True/False)
 
         # Legacy color list for histogram display (derived from colormap)
         self.channel_colors = [
@@ -150,6 +151,7 @@ class CompositeImageVisual:
 
             self.channel_clims[c] = default_clim
             self.channel_gammas[c] = 1.0
+            self.channel_visibility[c] = True
 
     def set_mode(self, mode):
         self.mode = mode
@@ -162,13 +164,15 @@ class CompositeImageVisual:
     def _update_visibility(self):
         for i, layer in enumerate(self.layers):
             if self.mode == "composite":
-                layer.visible = True
+                # In composite mode, respect per-channel visibility toggle
+                layer.visible = self.channel_visibility.get(i, True)
                 layer.set_gl_state(
                     blend=True,
                     blend_func=("one", "one"),
                     depth_test=False,
                 )
             else:
+                # In single channel mode, only show active channel
                 layer.visible = i == self.active_channel_idx
 
     def update_slice(self, t_idx, z_idx):
@@ -273,6 +277,16 @@ class CompositeImageVisual:
     def get_colormap_name(self, channel_idx):
         """Get the current colormap name for a channel."""
         return self.channel_colormaps.get(channel_idx, "White")
+
+    def set_channel_visible(self, channel_idx, visible):
+        """Set visibility for a specific channel in composite mode."""
+        if channel_idx < len(self.layers):
+            self.channel_visibility[channel_idx] = visible
+            self._update_visibility()
+
+    def get_channel_visible(self, channel_idx):
+        """Get visibility state for a specific channel."""
+        return self.channel_visibility.get(channel_idx, True)
 
     def reset_camera(self, shape):
         _, _, _, Y, X = shape

@@ -25,7 +25,7 @@ from vispy import app, scene
 
 from .io import load_image, Numpy5DProxy, normalize_to_5d
 from .visuals import CompositeImageVisual
-from .widgets import ContrastDialog, MetadataDialog
+from .widgets import ContrastDialog, MetadataDialog, ChannelPanel
 from .manager import manager
 from .rois import CoordinateROI, RectangleROI, CircleROI, LineROI
 from .roi_manager import get_roi_manager
@@ -119,6 +119,7 @@ class ImageWindow(QMainWindow):
 
         # 7. Menu & Dialogs
         self.contrast_dialog = None
+        self.channel_panel = None
         self._setup_menu()
         
         # 8. ROI State
@@ -197,6 +198,11 @@ class ImageWindow(QMainWindow):
         bc_action.setShortcut("Shift+C")
         bc_action.triggered.connect(self.show_contrast_dialog)
         adjust_menu.addAction(bc_action)
+
+        channels_action = QAction("Channels...", self)
+        channels_action.setShortcut("Shift+H")
+        channels_action.triggered.connect(self.show_channel_panel)
+        adjust_menu.addAction(channels_action)
         
         # Image Menu
         image_menu = menubar.addMenu("Image")
@@ -230,6 +236,13 @@ class ImageWindow(QMainWindow):
         self.contrast_dialog.show()
         self.contrast_dialog.raise_()
         self.contrast_dialog.refresh_ui()
+
+    def show_channel_panel(self):
+        if self.channel_panel is None:
+            self.channel_panel = ChannelPanel(self, parent=self)
+        self.channel_panel.show()
+        self.channel_panel.raise_()
+        self.channel_panel.refresh_ui()
 
     def set_tool(self, tool_name):
         """
@@ -379,6 +392,8 @@ class ImageWindow(QMainWindow):
         self.canvas.update()
         if self.contrast_dialog and self.contrast_dialog.isVisible():
             self.contrast_dialog.refresh_ui()
+        if self.channel_panel and self.channel_panel.isVisible():
+            self.channel_panel.refresh_ui()
 
     def _map_event_to_image(self, event):
         tr = self.canvas.scene.node_transform(self.renderer.layers[0])
