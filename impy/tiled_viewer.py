@@ -150,6 +150,7 @@ class TileWidget(QFrame):
         self._current_channel = 0
         self._is_projection = False
         self._proj_range = (0, 0)
+        self._show_info = True  # Whether to show info label
 
         # Setup UI
         self._setup_ui()
@@ -203,15 +204,23 @@ class TileWidget(QFrame):
         self._update_size()
 
     def _update_size(self):
-        """Update widget size based on tile_size."""
-        label_height = 32
-        total_height = self._tile_size + label_height + 8  # margins + spacing
+        """Update widget size based on tile_size and info visibility."""
+        label_height = 32 if self._show_info else 0
+        spacing = 8 if self._show_info else 4
+        total_height = self._tile_size + label_height + spacing
         self.setFixedSize(self._tile_size, total_height)
 
     def sizeHint(self):
-        label_height = 32
-        total_height = self._tile_size + label_height + 8
+        label_height = 32 if self._show_info else 0
+        spacing = 8 if self._show_info else 4
+        total_height = self._tile_size + label_height + spacing
         return QSize(self._tile_size, total_height)
+
+    def set_show_info(self, show: bool):
+        """Show or hide the info label."""
+        self._show_info = show
+        self.info_label.setVisible(show)
+        self._update_size()
 
     def set_tile_size(self, size):
         """Update tile size (does not affect internal zoom)."""
@@ -459,6 +468,9 @@ class TiledViewer(QMainWindow):
         self.max_Z = 1
         self.max_C = 1
 
+        # Display settings
+        self.show_info = True  # Whether to show info labels on tiles
+
         self.tile_widgets = []
 
         self._setup_ui()
@@ -526,6 +538,14 @@ class TiledViewer(QMainWindow):
         self.size_label = QLabel(f"{self.tile_size}px")
         self.size_label.setFixedWidth(50)
         toolbar1_layout.addWidget(self.size_label)
+
+        toolbar1_layout.addSpacing(20)
+
+        # Show info checkbox
+        self.show_info_check = QCheckBox("Show Info (I)")
+        self.show_info_check.setChecked(True)
+        self.show_info_check.toggled.connect(self._on_show_info_toggled)
+        toolbar1_layout.addWidget(self.show_info_check)
 
         toolbar1_layout.addStretch()
 
@@ -723,6 +743,7 @@ class TiledViewer(QMainWindow):
         # Create and load tiles
         for path in self.image_paths[start:end]:
             tile = TileWidget(self.tile_size, parent=self)
+            tile.set_show_info(self.show_info)
             tile.load(path)
             self.flow_layout.addWidget(tile)
             self.tile_widgets.append(tile)
@@ -822,6 +843,18 @@ class TiledViewer(QMainWindow):
         for tile in self.tile_widgets:
             tile._fit_view()
 
+    def _on_show_info_toggled(self, checked):
+        """Handle show info checkbox toggle."""
+        self.show_info = checked
+        for tile in self.tile_widgets:
+            tile.set_show_info(checked)
+        # Trigger reflow
+        self.flow_container.adjustSize()
+
+    def _toggle_show_info(self):
+        """Toggle info label visibility."""
+        self.show_info_check.setChecked(not self.show_info_check.isChecked())
+
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts."""
         key = event.key()
@@ -842,6 +875,9 @@ class TiledViewer(QMainWindow):
         elif key == Qt.Key_C:
             # Auto contrast all
             self._auto_contrast_all()
+        elif key == Qt.Key_I:
+            # Toggle info labels
+            self._toggle_show_info()
         elif key == Qt.Key_Plus or key == Qt.Key_Equal:
             # Increase tile size
             new_size = min(400, self.tile_size + 25)
