@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 
 import numpy as np
-from qtpy.QtCore import Qt, QRect, QPoint, QSize
+from qtpy.QtCore import QPoint, QRect, QSize, Qt
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -86,7 +86,9 @@ class FlowLayout(QLayout):
         for item in self._items:
             size = size.expandedTo(item.minimumSize())
         margin = self.contentsMargins()
-        size += QSize(margin.left() + margin.right(), margin.top() + margin.bottom())
+        size += QSize(
+            margin.left() + margin.right(), margin.top() + margin.bottom()
+        )
         return size
 
     def _do_layout(self, rect, test_only=False):
@@ -112,14 +114,19 @@ class FlowLayout(QLayout):
             next_x = x + item_width + space_x
 
             # Wrap to next row if exceeded width
-            if next_x - space_x > effective_rect.right() + 1 and line_height > 0:
+            if (
+                next_x - space_x > effective_rect.right() + 1
+                and line_height > 0
+            ):
                 x = effective_rect.x()
                 y = y + line_height + space_y
                 next_x = x + item_width + space_x
                 line_height = 0
 
             if not test_only:
-                widget.setGeometry(QRect(QPoint(x, y), QSize(item_width, item_height)))
+                widget.setGeometry(
+                    QRect(QPoint(x, y), QSize(item_width, item_height))
+                )
 
             x = next_x
             line_height = max(line_height, item_height)
@@ -179,7 +186,9 @@ class TileWidget(QFrame):
         layout.setSpacing(2)
 
         # Vispy canvas
-        self.canvas = scene.SceneCanvas(keys=None, bgcolor="#1a1a1a", show=False)
+        self.canvas = scene.SceneCanvas(
+            keys=None, bgcolor="#1a1a1a", show=False
+        )
         self.view = self.canvas.central_widget.add_view()
         self.view.camera = "panzoom"
         self.view.camera.aspect = 1
@@ -266,8 +275,15 @@ class TileWidget(QFrame):
         self.data = None
         self.meta = None
 
-    def update_view(self, t_idx=0, z_idx=None, mode="composite", channel_idx=0,
-                    projection=False, proj_range=None):
+    def update_view(
+        self,
+        t_idx=0,
+        z_idx=None,
+        mode="composite",
+        channel_idx=0,
+        projection=False,
+        proj_range=None,
+    ):
         """
         Update the displayed slice with global settings.
         Handles bounds checking for this image's dimensions.
@@ -334,20 +350,22 @@ class TileWidget(QFrame):
         # Z info
         if Z > 1:
             if self._is_projection:
-                state_parts.append(f"z:{self._proj_range[0]}-{self._proj_range[1]} (max)")
+                state_parts.append(
+                    f"z:{self._proj_range[0]}-{self._proj_range[1]} (max)"
+                )
             else:
-                state_parts.append(f"z:{self._current_z}/{Z-1}")
+                state_parts.append(f"z:{self._current_z}/{Z - 1}")
 
         # Channel info (only in single mode or if multiple channels)
         if C > 1:
             if self._current_mode == "single":
-                state_parts.append(f"ch:{self._current_channel}/{C-1}")
+                state_parts.append(f"ch:{self._current_channel}/{C - 1}")
             else:
                 state_parts.append(f"{C}ch")
 
         # Time info
         if T > 1:
-            state_parts.append(f"t:{self._current_t}/{T-1}")
+            state_parts.append(f"t:{self._current_t}/{T - 1}")
 
         state_str = " | ".join(state_parts) if state_parts else ""
 
@@ -521,7 +539,9 @@ class TiledViewer(QMainWindow):
             else 1
         )
         self.per_page_combo.setCurrentIndex(idx)
-        self.per_page_combo.currentIndexChanged.connect(self._on_per_page_changed)
+        self.per_page_combo.currentIndexChanged.connect(
+            self._on_per_page_changed
+        )
         toolbar1_layout.addWidget(self.per_page_combo)
 
         toolbar1_layout.addSpacing(20)
@@ -611,7 +631,9 @@ class TiledViewer(QMainWindow):
         self.proj_range_slider.setRange(0, 0)
         self.proj_range_slider.setValue((0, 0))
         self.proj_range_slider.setFixedWidth(100)
-        self.proj_range_slider.valueChanged.connect(self._on_proj_range_changed)
+        self.proj_range_slider.valueChanged.connect(
+            self._on_proj_range_changed
+        )
         proj_range_layout.addWidget(self.proj_range_slider)
         self.proj_range_label = QLabel("0-0")
         self.proj_range_label.setFixedWidth(40)
@@ -645,7 +667,7 @@ class TiledViewer(QMainWindow):
 
         # Container with flow layout
         self.flow_container = QWidget()
-        self.flow_layout = FlowLayout(self.flow_container, spacing=8)
+        self.flow_layout = FlowLayout(self.flow_container, spacing=0)
         self.scroll_area.setWidget(self.flow_container)
 
         main_layout.addWidget(self.scroll_area, 1)
@@ -658,7 +680,11 @@ class TiledViewer(QMainWindow):
         self._update_page_controls()
 
     def _total_pages(self):
-        return max(1, (len(self.image_paths) + self.tiles_per_page - 1) // self.tiles_per_page)
+        return max(
+            1,
+            (len(self.image_paths) + self.tiles_per_page - 1)
+            // self.tiles_per_page,
+        )
 
     def _update_page_controls(self):
         """Update page navigation UI."""
@@ -717,7 +743,9 @@ class TiledViewer(QMainWindow):
         """Update dimension labels."""
         self.z_label.setText(str(self.z_idx))
         self.channel_label.setText(str(self.channel_idx))
-        self.proj_range_label.setText(f"{self.z_proj_range[0]}-{self.z_proj_range[1]}")
+        self.proj_range_label.setText(
+            f"{self.z_proj_range[0]}-{self.z_proj_range[1]}"
+        )
 
     def _apply_global_settings(self):
         """Apply current global settings to all tiles."""
@@ -728,7 +756,7 @@ class TiledViewer(QMainWindow):
                 mode=self.mode,
                 channel_idx=self.channel_idx,
                 projection=self.z_projection,
-                proj_range=self.z_proj_range if self.z_projection else None
+                proj_range=self.z_proj_range if self.z_projection else None,
             )
 
     def _load_current_page(self):
@@ -803,7 +831,9 @@ class TiledViewer(QMainWindow):
         """Handle mode change."""
         self.mode = "composite" if index == 0 else "single"
         # Show/hide channel selector
-        self.channel_widget.setVisible(self.mode == "single" and self.max_C > 1)
+        self.channel_widget.setVisible(
+            self.mode == "single" and self.max_C > 1
+        )
         self._apply_global_settings()
 
     def _on_channel_changed(self, value):
@@ -930,10 +960,12 @@ def open_tiled_viewer(image_paths, tiles_per_page=50):
     app = QApplication.instance()
     if app is None:
         import sys
+
         app = QApplication(sys.argv)
 
     # Apply theme
     from .theme import DARK_THEME
+
     app.setStyleSheet(DARK_THEME)
 
     viewer = TiledViewer(image_paths, tiles_per_page=tiles_per_page)
