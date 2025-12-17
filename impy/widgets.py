@@ -697,6 +697,7 @@ class ChannelRow(QWidget):
         self.name_label = QLabel(channel_name)
         self.name_label.setFixedWidth(60)
         self.name_label.setStyleSheet("color: #EEE; font-size: 11px;")
+        self.name_label.setToolTip(channel_name)  # Show full name on hover
         layout.addWidget(self.name_label)
 
         # Compact histogram
