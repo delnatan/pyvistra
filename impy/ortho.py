@@ -15,7 +15,7 @@ from vispy import scene
 from vispy.visuals.transforms import STTransform
 
 from .visuals import CompositeImageVisual
-from .widgets import ContrastDialog, MetadataDialog
+from .widgets import ContrastDialog, MetadataDialog, ChannelPanel
 from .manager import manager
 
 class OrthoVisualProxy:
@@ -58,10 +58,24 @@ class OrthoVisualProxy:
     def set_mode(self, mode):
         for v in self.visuals:
             v.set_mode(mode)
-            
+
     def set_active_channel(self, idx):
         for v in self.visuals:
             v.set_active_channel(idx)
+
+    def set_colormap(self, channel_idx, cmap_name):
+        for v in self.visuals:
+            v.set_colormap(channel_idx, cmap_name)
+
+    def get_colormap_name(self, channel_idx):
+        return self.primary.get_colormap_name(channel_idx)
+
+    def set_channel_visible(self, channel_idx, visible):
+        for v in self.visuals:
+            v.set_channel_visible(channel_idx, visible)
+
+    def get_channel_visible(self, channel_idx):
+        return self.primary.get_channel_visible(channel_idx)
 
 
 class TransposedProxy:
@@ -332,14 +346,19 @@ class OrthoViewer(QMainWindow):
 
     def _setup_menu(self):
         menubar = self.menuBar()
-        
+
         # Adjust
         adjust_menu = menubar.addMenu("Adjust")
         bc_action = QAction("Brightness/Contrast", self)
         bc_action.setShortcut("Shift+C")
         bc_action.triggered.connect(self.show_contrast_dialog)
         adjust_menu.addAction(bc_action)
-        
+
+        channels_action = QAction("Channels...", self)
+        channels_action.setShortcut("Shift+H")
+        channels_action.triggered.connect(self.show_channel_panel)
+        adjust_menu.addAction(channels_action)
+
         # Image
         image_menu = menubar.addMenu("Image")
         info_action = QAction("Image Info", self)
@@ -453,6 +472,12 @@ class OrthoViewer(QMainWindow):
         self.canvas_zy.update()
         self.canvas_zx.update()
 
+        # Refresh dialogs if visible
+        if hasattr(self, 'contrast_dialog') and self.contrast_dialog and self.contrast_dialog.isVisible():
+            self.contrast_dialog.refresh_ui()
+        if hasattr(self, 'channel_panel') and self.channel_panel and self.channel_panel.isVisible():
+            self.channel_panel.refresh_ui()
+
     def reset_cameras(self):
         sx, sy, sz = self.scale[2], self.scale[1], self.scale[0]
         
@@ -492,18 +517,18 @@ class OrthoViewer(QMainWindow):
 
     def show_contrast_dialog(self):
         if not hasattr(self, 'contrast_dialog'):
-            # Pass Proxy as viewer
             self.contrast_dialog = ContrastDialog(self, parent=self)
-            # Patch the viewer attribute to be our proxy for renderer access
-            # But ContrastDialog expects 'viewer.renderer'
-            # So we can just set self.renderer = self.proxy temporarily or wrap it?
-            # Better: Make ContrastDialog accept an object that has 'renderer' attribute
-            # Or just add 'renderer' property to OrthoViewer that returns proxy
-            pass
-            
+
         self.contrast_dialog.show()
         self.contrast_dialog.raise_()
         self.contrast_dialog.refresh_ui()
+
+    def show_channel_panel(self):
+        if not hasattr(self, 'channel_panel') or self.channel_panel is None:
+            self.channel_panel = ChannelPanel(self, parent=self)
+        self.channel_panel.show()
+        self.channel_panel.raise_()
+        self.channel_panel.refresh_ui()
         
     @property
     def renderer(self):
