@@ -1,3 +1,4 @@
+import os
 import sys
 
 import numpy as np
@@ -586,8 +587,33 @@ class Toolbar(QMainWindow):
 
     def dropEvent(self, event: QDropEvent):
         files = [u.toLocalFile() for u in event.mimeData().urls()]
+
+        # Collect supported image files
+        supported_ext = {'.ims', '.tif', '.tiff', '.png', '.jpg', '.jpeg'}
+        image_files = []
+
         for f in files:
-            self.spawn_viewer(f)
+            if os.path.isdir(f):
+                # Folder: collect all images recursively
+                for root, _, names in os.walk(f):
+                    for name in names:
+                        if os.path.splitext(name)[1].lower() in supported_ext:
+                            image_files.append(os.path.join(root, name))
+            elif os.path.splitext(f)[1].lower() in supported_ext:
+                image_files.append(f)
+
+        # Sort by filename
+        image_files.sort()
+
+        if len(image_files) > 1:
+            # Multiple files -> TiledViewer
+            from .tiled_viewer import TiledViewer
+            viewer = TiledViewer(image_files)
+            viewer.show()
+            self.open_windows.append(viewer)
+        elif len(image_files) == 1:
+            # Single file -> regular ImageWindow
+            self.spawn_viewer(image_files[0])
 
     def open_file_dialog(self):
         fname, _ = QFileDialog.getOpenFileName(self, "Open file", ".")

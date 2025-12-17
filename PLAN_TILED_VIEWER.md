@@ -2,15 +2,16 @@
 
 ## Overview
 
-A gallery-style tiled image viewer for comparing multiple fluorescently-labeled neuron images, inspired by single-particle cryo-EM software (e.g., RELION, cryoSPARC particle galleries).
+A gallery-style tiled image viewer for comparing multiple images, inspired by single-particle cryo-EM software (e.g., RELION, cryoSPARC particle galleries). Designed for fluorescently-labeled neuron crops, but generic enough to handle any collection of 2D images (e.g., sub-ROI crops, particle picks).
 
 ## Design Goals
 
-1. **Memory-efficient**: User-specified "images per page" with lazy loading
+1. **Memory-efficient**: Capped tiles per page with lazy loading
 2. **Responsive**: GPU-accelerated rendering via Vispy (one SceneCanvas per tile)
 3. **Informative**: Quick access to per-image metadata
 4. **Flexible contrast**: Per-tile contrast adjustment for wide dynamic range
 5. **Ergonomic input**: Drag-drop multiple files or folder to trigger
+6. **Fluid layout**: Tiles flow/wrap naturally, resize with window
 
 ---
 
@@ -22,23 +23,56 @@ A gallery-style tiled image viewer for comparing multiple fluorescently-labeled 
 impy/
 ├── tiled_viewer.py    # TiledViewer window + TileWidget component
 └── (modify existing)
-    ├── ui.py          # Update Toolbar drop handling
-    └── io.py          # Add batch loading utility
+    └── ui.py          # Update Toolbar drop handling
 ```
 
 ### Class Hierarchy
 
 ```
 TiledViewer (QMainWindow)
-├── Navigation bar (page controls, per-page count selector)
-├── QScrollArea containing QGridLayout
-│   └── TileWidget[] (one per visible image)
-│       ├── SceneCanvas (Vispy) for rendering
-│       ├── CompositeImageVisual (reused from visuals.py)
-│       ├── Info overlay (filename, dimensions, scale)
-│       └── Mini contrast control (click to expand)
-└── Status bar (current page, total images)
+├── Toolbar (page nav, tile size slider, per-page selector)
+├── QScrollArea
+│   └── FlowContainer (custom widget with flow layout)
+│       └── TileWidget[] (one per loaded image)
+│           ├── SceneCanvas (Vispy) for rendering
+│           ├── CompositeImageVisual (reused from visuals.py)
+│           └── Info label (filename, dimensions)
+└── Status bar (page info, tile count)
 ```
+
+---
+
+## Key Design Decisions
+
+### Flow Layout with Scrolling
+
+- Tiles flow left-to-right, wrapping to next row when window width exceeded
+- Vertical scrollbar for viewing all tiles on current page
+- Window resize → tiles reflow naturally (like CSS flexbox wrap)
+- No fixed grid — number of columns depends on tile size and window width
+
+### Tile Size vs Zoom (Independent)
+
+| Concept | What it controls | User control |
+|---------|------------------|--------------|
+| **Tile size** | Widget dimensions in layout (px) | Slider: 100–400px |
+| **Zoom** | Pan/zoom within Vispy canvas | Mouse wheel/drag inside tile |
+
+Changing tile size reflows the layout. Zooming inside a tile does not affect layout.
+
+### Pagination for Memory Management
+
+- **Max tiles per page**: Capped (e.g., 50–100) to limit GPU memory
+- **Per-page selector**: User chooses how many images to load at once
+- **Page navigation**: Load/unload batches of images
+- Future: HDF5-backed tile storage for dynamic fetching
+
+### Input: List of File Paths
+
+Generic interface — accepts any list of image paths:
+- Drag-drop multiple files → TiledViewer
+- Drag-drop folder → collect all images recursively
+- Programmatic: `TiledViewer(image_paths=[...])`
 
 ---
 
@@ -48,182 +82,287 @@ TiledViewer (QMainWindow)
 
 ```python
 class TiledViewer(QMainWindow):
-    """Gallery view for multiple images in a paginated grid."""
+    """Gallery view for multiple images with flow layout."""
 
-    def __init__(self, image_paths: list[str], images_per_page: int = 9):
-        # Parameters
-        self.image_paths = image_paths      # All file paths
-        self.images_per_page = images_per_page
+    def __init__(self, image_paths: list[str], tiles_per_page: int = 50):
+        self.image_paths = image_paths
+        self.tiles_per_page = tiles_per_page  # Max tiles loaded at once
         self.current_page = 0
+        self.tile_size = 200  # Default tile size in pixels
 
-        # Loaded data (only current page)
         self.tile_widgets: list[TileWidget] = []
 
-        # UI Layout
         self._setup_ui()
         self._load_current_page()
 ```
 
-**Key features:**
-- Pagination with Previous/Next buttons + page indicator
-- "Images per page" dropdown: 4, 9, 16, 25 (2x2, 3x3, 4x4, 5x5)
-- Keyboard navigation: Left/Right arrows for pages
-- "Open in separate window" action per tile (spawns regular ImageWindow)
-- Global zoom level sync (optional checkbox)
+**Layout:**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ ◀ Page 1/3 ▶ │ Tiles/page: [50▼] │ Size: [────●────] │ [Auto All]│
+├─────────────────────────────────────────────────────────────────┤
+│ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐       ▲│
+│ │     │ │     │ │     │ │     │ │     │ │     │ │     │       ░│
+│ │ IMG │ │ IMG │ │ IMG │ │ IMG │ │ IMG │ │ IMG │ │ IMG │       ░│
+│ │     │ │     │ │     │ │     │ │     │ │     │ │     │       ░│
+│ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘       ░│
+│ name_01 name_02 name_03 name_04 name_05 name_06 name_07       ░│
+│ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ...                   ░│
+│ │     │ │     │ │     │ │     │ │     │                       ░│
+│ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘                       ▼│
+├─────────────────────────────────────────────────────────────────┤
+│ Showing 1-50 of 127 images                                      │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-### 2. TileWidget (Individual Tile)
+### 2. FlowLayout (Custom Layout Manager)
+
+Qt doesn't have a built-in flow layout, so we implement one:
 
 ```python
-class TileWidget(QWidget):
-    """Single tile in the gallery grid."""
+class FlowLayout(QLayout):
+    """Layout that arranges widgets in a flowing left-to-right, top-to-bottom manner."""
 
-    def __init__(self, parent: TiledViewer):
-        self.canvas = scene.SceneCanvas(keys=None, bgcolor="black")
+    def __init__(self, parent=None, spacing=8):
+        super().__init__(parent)
+        self._items = []
+        self._spacing = spacing
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index):
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        # Calculate based on items
+        ...
+
+    def doLayout(self, rect, test_only=False):
+        """Arrange items in flow layout within given rect."""
+        x, y = rect.x(), rect.y()
+        line_height = 0
+
+        for item in self._items:
+            widget = item.widget()
+            space_x = self._spacing
+            space_y = self._spacing
+
+            next_x = x + widget.sizeHint().width() + space_x
+
+            if next_x - space_x > rect.right() and line_height > 0:
+                # Wrap to next row
+                x = rect.x()
+                y = y + line_height + space_y
+                next_x = x + widget.sizeHint().width() + space_x
+                line_height = 0
+
+            if not test_only:
+                widget.setGeometry(QRect(QPoint(x, y), widget.sizeHint()))
+
+            x = next_x
+            line_height = max(line_height, widget.sizeHint().height())
+
+        return y + line_height - rect.y()
+```
+
+### 3. TileWidget (Individual Tile)
+
+```python
+class TileWidget(QFrame):
+    """Single tile displaying one image with Vispy canvas."""
+
+    def __init__(self, tile_size: int = 200):
+        super().__init__()
+        self._tile_size = tile_size
+
+        # Vispy canvas for GPU rendering
+        self.canvas = scene.SceneCanvas(keys=None, bgcolor="#1a1a1a")
         self.view = self.canvas.central_widget.add_view()
         self.view.camera = "panzoom"
         self.view.camera.aspect = 1
 
+        # Renderer (reuse existing CompositeImageVisual)
         self.renderer = CompositeImageVisual(self.view)
-        self.data = None       # 5D proxy/array
-        self.meta = None       # Metadata dict
-        self.selected = False  # For multi-select operations
 
-        # Info overlay (semi-transparent label)
-        self.info_label = QLabel()  # Shows filename, dimensions
+        # Data
+        self.data = None   # 5D array/proxy
+        self.meta = None   # Metadata dict
+        self.file_path = None
 
-        # Mini contrast button (click to show popup)
-        self.contrast_btn = QToolButton()
+        # UI
+        self.info_label = QLabel()  # Shows filename
+        self._setup_ui()
+
+    def set_tile_size(self, size: int):
+        """Update tile size (does not affect internal zoom)."""
+        self._tile_size = size
+        self.setFixedSize(size, size + 20)  # +20 for info label
+        self.canvas.native.setFixedSize(size, size)
+        self.updateGeometry()
+
+    def load(self, path: str):
+        """Load image from path."""
+        self.file_path = path
+        self.data, self.meta = load_image(path)
+
+        # Display first frame/slice
+        self.renderer.set_data(self.data)
+        self.renderer.update_slice(0, 0)  # t=0, z=middle
+        self._fit_view()
+        self._update_info()
+
+    def unload(self):
+        """Release memory."""
+        self.renderer.clear()
+        self.data = None
+        self.meta = None
+
+    def _fit_view(self):
+        """Reset camera to fit image."""
+        if self.data is not None:
+            h, w = self.data.shape[-2:]
+            self.view.camera.set_range(x=(0, w), y=(0, h), margin=0)
 ```
 
-**Layout per tile:**
+**Tile Layout:**
 ```
-┌─────────────────────────────┐
-│ [filename.tif]    [⚙️] [🔍] │  <- Header: name, contrast btn, open btn
-├─────────────────────────────┤
-│                             │
-│     Vispy SceneCanvas       │  <- GPU-rendered image
-│     (CompositeImageVisual)  │
-│                             │
-├─────────────────────────────┤
-│ 512x512 | 3 ch | 0.1µm/px   │  <- Footer: quick metadata
-└─────────────────────────────┘
+┌─────────────────┐
+│                 │
+│  Vispy Canvas   │  ← Fixed size (tile_size × tile_size)
+│  (pan/zoom OK)  │
+│                 │
+├─────────────────┤
+│ filename.tif    │  ← Info label (truncated, tooltip for full)
+└─────────────────┘
 ```
 
-### 3. Contrast Popup (Per-Tile)
+### 4. Per-Tile Contrast (Context Menu)
 
-A lightweight popup anchored to the tile for quick contrast adjustment:
+Right-click on tile opens context menu:
 
 ```python
-class TileContrastPopup(QWidget):
-    """Compact contrast controls for a single tile."""
+def _show_context_menu(self, pos):
+    menu = QMenu(self)
 
-    def __init__(self, tile: TileWidget):
-        # Mini histogram (smaller than ContrastDialog)
-        self.histogram = HistogramWidget()
+    # Contrast action
+    contrast_action = menu.addAction("Adjust Contrast...")
+    contrast_action.triggered.connect(self._show_contrast_dialog)
 
-        # Channel selector (if multi-channel)
-        self.channel_combo = QComboBox()
+    # Auto contrast
+    auto_action = menu.addAction("Auto Contrast")
+    auto_action.triggered.connect(self._auto_contrast)
 
-        # Auto-contrast button
-        self.auto_btn = QPushButton("Auto")
+    menu.addSeparator()
 
-        # Gamma slider (compact)
-        self.gamma_slider = QSlider(Qt.Horizontal)
+    # Open in new window
+    open_action = menu.addAction("Open in Viewer")
+    open_action.triggered.connect(self._open_in_viewer)
+
+    # Show metadata
+    meta_action = menu.addAction("Show Metadata")
+    meta_action.triggered.connect(self._show_metadata)
+
+    menu.exec_(self.mapToGlobal(pos))
 ```
 
-**Interaction:**
-- Click contrast button → popup appears below/beside tile
-- Click elsewhere → popup closes
-- "Apply to all" button copies settings to all visible tiles
+**Contrast Dialog**: Reuse existing `ContrastDialog` from widgets.py, or create a simplified popup version.
 
 ---
 
 ## Workflow
 
-### Drag-and-Drop Trigger
-
-**Modified `Toolbar.dropEvent()` in ui.py:**
+### Drag-and-Drop Trigger (Modified Toolbar)
 
 ```python
+# In ui.py Toolbar class
+
 def dropEvent(self, event: QDropEvent):
     files = [u.toLocalFile() for u in event.mimeData().urls()]
 
-    # Filter to supported image files
-    supported = ['.ims', '.tif', '.tiff', '.png', '.jpg']
+    # Collect supported image files
+    supported_ext = {'.ims', '.tif', '.tiff', '.png', '.jpg', '.jpeg'}
     image_files = []
 
     for f in files:
         if os.path.isdir(f):
-            # Folder dropped: collect all images inside
+            # Folder: collect all images recursively
             for root, _, names in os.walk(f):
                 for name in names:
-                    if any(name.lower().endswith(ext) for ext in supported):
+                    if Path(name).suffix.lower() in supported_ext:
                         image_files.append(os.path.join(root, name))
-        elif any(f.lower().endswith(ext) for ext in supported):
+        elif Path(f).suffix.lower() in supported_ext:
             image_files.append(f)
 
+    # Sort by filename
+    image_files.sort()
+
     if len(image_files) > 1:
-        # Multiple files → open TiledViewer
-        self._open_tiled_viewer(image_files)
+        # Multiple files → TiledViewer
+        from .tiled_viewer import TiledViewer
+        viewer = TiledViewer(image_files)
+        viewer.show()
     elif len(image_files) == 1:
-        # Single file → open regular ImageWindow
+        # Single file → regular ImageWindow
         self.spawn_viewer(image_files[0])
 ```
 
-### Page Loading
+### Page Loading/Unloading
 
 ```python
 def _load_current_page(self):
-    """Load only images for current page (memory efficiency)."""
-    start_idx = self.current_page * self.images_per_page
-    end_idx = min(start_idx + self.images_per_page, len(self.image_paths))
+    """Load tiles for current page."""
+    # Clear existing tiles
+    self._clear_tiles()
 
-    # Clear previous tiles
-    for tile in self.tile_widgets:
-        tile.unload()  # Release memory
-    self.tile_widgets.clear()
+    # Calculate slice
+    start = self.current_page * self.tiles_per_page
+    end = min(start + self.tiles_per_page, len(self.image_paths))
 
-    # Load new tiles
-    for i, path in enumerate(self.image_paths[start_idx:end_idx]):
-        tile = TileWidget(self)
-        tile.load(path)  # Calls load_image() from io.py
-
-        row, col = divmod(i, self.grid_cols)
-        self.grid_layout.addWidget(tile, row, col)
+    # Create and load tiles
+    for path in self.image_paths[start:end]:
+        tile = TileWidget(self.tile_size)
+        tile.load(path)
+        tile.setContextMenuPolicy(Qt.CustomContextMenu)
+        tile.customContextMenuRequested.connect(
+            lambda pos, t=tile: self._show_tile_context_menu(t, pos)
+        )
+        self.flow_layout.addWidget(tile)
         self.tile_widgets.append(tile)
+
+    self._update_status()
+
+def _clear_tiles(self):
+    """Remove and unload all current tiles."""
+    for tile in self.tile_widgets:
+        tile.unload()
+        self.flow_layout.removeWidget(tile)
+        tile.deleteLater()
+    self.tile_widgets.clear()
 ```
 
-### Synchronized Zoom (Optional)
+### Tile Size Adjustment
 
 ```python
-def _link_cameras(self, enabled: bool):
-    """Link all tile cameras for synchronized pan/zoom."""
-    if not self.tile_widgets:
-        return
+def _on_tile_size_changed(self, value: int):
+    """Handle tile size slider change."""
+    self.tile_size = value
+    for tile in self.tile_widgets:
+        tile.set_tile_size(value)
 
-    primary = self.tile_widgets[0].view.camera
-    for tile in self.tile_widgets[1:]:
-        if enabled:
-            tile.view.camera.link(primary)
-        else:
-            tile.view.camera.link(None)  # Unlink
+    # Trigger reflow
+    self.flow_container.updateGeometry()
+    self.scroll_area.widget().adjustSize()
 ```
-
----
-
-## Metadata Display
-
-### Info Overlay
-
-Each tile shows:
-- **Filename** (truncated if long, full on hover tooltip)
-- **Dimensions**: e.g., "512×512 | Z:10 | C:3"
-- **Scale**: e.g., "0.108 µm/px" (if available)
-- **Dynamic range**: e.g., "16-bit | 234–4095"
-
-### Detailed Metadata Dialog
-
-Right-click tile → "Show Metadata" → Opens `MetadataDialog` (existing widget)
 
 ---
 
@@ -231,110 +370,68 @@ Right-click tile → "Show Metadata" → Opens `MetadataDialog` (existing widget
 
 | Key | Action |
 |-----|--------|
-| `←` / `→` | Previous / Next page |
+| `←` / `→` or `PgUp` / `PgDn` | Previous / Next page |
 | `Home` / `End` | First / Last page |
-| `+` / `-` | Zoom in/out all tiles (if linked) |
 | `A` | Auto-contrast all visible tiles |
-| `Enter` | Open selected tile in new ImageWindow |
-| `Esc` | Close contrast popup |
-
----
-
-## UI Mockup
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ Tiled Viewer - 27 images                             [_][□][×] │
-├─────────────────────────────────────────────────────────────────┤
-│ ◀ Page 1 of 3 ▶    Per page: [9 ▼]    [🔗 Link zoom]  [Auto All]│
-├─────────────────────────────────────────────────────────────────┤
-│ ┌───────────┐  ┌───────────┐  ┌───────────┐                    │
-│ │neuron_01  │  │neuron_02  │  │neuron_03  │                    │
-│ │  ┌─────┐  │  │  ┌─────┐  │  │  ┌─────┐  │                    │
-│ │  │     │  │  │  │     │  │  │  │     │  │                    │
-│ │  │ IMG │  │  │  │ IMG │  │  │  │ IMG │  │                    │
-│ │  │     │  │  │  └─────┘  │  │  │     │  │                    │
-│ │  └─────┘  │  │256×256|1ch│  │  └─────┘  │                    │
-│ │512×512|3ch│  └───────────┘  │512×512|3ch│                    │
-│ └───────────┘                  └───────────┘                    │
-│ ┌───────────┐  ┌───────────┐  ┌───────────┐                    │
-│ │neuron_04  │  │neuron_05  │  │neuron_06  │                    │
-│ │  ┌─────┐  │  │  ┌─────┐  │  │  ┌─────┐  │                    │
-│ │  │     │  │  │  │     │  │  │  │     │  │                    │
-│ │  │ IMG │  │  │  │ IMG │  │  │  │ IMG │  │                    │
-│ │  │     │  │  │  └─────┘  │  │  │     │  │                    │
-│ │  └─────┘  │  │256×256|2ch│  │  └─────┘  │                    │
-│ │512×512|3ch│  └───────────┘  │512×512|3ch│                    │
-│ └───────────┘                  └───────────┘                    │
-│ ┌───────────┐  ┌───────────┐  ┌───────────┐                    │
-│ │neuron_07  │  │neuron_08  │  │neuron_09  │                    │
-│ │  ...      │  │  ...      │  │  ...      │                    │
-│ └───────────┘  └───────────┘  └───────────┘                    │
-├─────────────────────────────────────────────────────────────────┤
-│ Showing 1-9 of 27 images                                        │
-└─────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Implementation Steps
-
-### Phase 1: Core TiledViewer (MVP)
-1. Create `tiled_viewer.py` with `TiledViewer` class
-2. Implement `TileWidget` with basic Vispy rendering
-3. Add pagination logic (load/unload pages)
-4. Integrate with `Toolbar.dropEvent()` for multi-file drops
-
-### Phase 2: Contrast Controls
-5. Add per-tile contrast popup (`TileContrastPopup`)
-6. Implement "Auto Contrast All" button
-7. Add "Apply to All" functionality
-
-### Phase 3: Metadata & Info
-8. Add info overlay to each tile (filename, dimensions)
-9. Right-click context menu with "Show Metadata", "Open in Window"
-10. Tooltip with full path on hover
-
-### Phase 4: Polish
-11. Keyboard navigation
-12. Camera linking (synchronized zoom)
-13. Folder drop support
-14. Remember per-page setting (QSettings)
+| `+` / `-` | Increase / decrease tile size |
+| `Ctrl+O` | Open files dialog |
 
 ---
 
 ## Memory Considerations
 
-| Images | Per-page | Loaded tiles | Approx. memory* |
-|--------|----------|--------------|-----------------|
-| 100    | 9        | 9            | ~150 MB         |
-| 100    | 16       | 16           | ~260 MB         |
-| 100    | 25       | 25           | ~400 MB         |
+### Tile Limits
 
-*Assuming 512×512×3ch×float32 ≈ 3 MB per image + GPU texture overhead
+| Tiles/page | Est. GPU memory* | Recommended for |
+|------------|------------------|-----------------|
+| 25         | ~100 MB          | Large images (1K+) |
+| 50         | ~200 MB          | Medium images (512px) |
+| 100        | ~400 MB          | Small images (<256px) |
 
-**Optimization strategies:**
-- Use `dtype=np.float32` for GPU textures (not float64)
-- Unload GPU textures when changing pages (`renderer.clear()`)
-- Consider thumbnail mode for very large images (load at reduced resolution)
+*Assuming 512×512×3ch×float32 per tile + texture overhead
 
----
+### Optimization Strategies
 
-## Open Questions for User
-
-1. **Grid layout**: Fixed square grid (3×3, 4×4) or flexible rows based on aspect ratio?
-2. **Selection**: Should tiles be selectable for batch operations (delete, export, etc.)?
-3. **Sorting**: Sort by filename, date, or manual reordering?
-4. **Thumbnail mode**: For very large images (>2K), show thumbnails first, full res on click?
-5. **Channel display**: In composite mode only, or allow single-channel view per tile?
+1. **Unload on page change**: Call `tile.unload()` to release GPU textures
+2. **Float32 textures**: Use `np.float32` (not float64) for GPU data
+3. **Single slice**: Only load t=0, z=middle by default
+4. **Future**: Virtual scrolling (create/destroy tiles as they scroll into view)
 
 ---
 
-## Alternative Considered: Single Large Canvas
+## Future Extensions
 
-Instead of multiple SceneCanvas instances, one large canvas with a grid of Image visuals:
+1. **HDF5 tile storage**: Store many small images in single HDF5 file for efficient I/O
+2. **Virtual scrolling**: Only render visible tiles for very large collections
+3. **Tile selection**: Multi-select for batch operations (export, delete)
+4. **Sorting**: Sort by name, date, or custom metadata field
+5. **Filtering**: Show only tiles matching criteria
+6. **Linked zoom**: Optional synchronized pan/zoom across all tiles
 
-**Pros**: Single GPU context, potentially more efficient
-**Cons**: Complex clipping, harder per-tile interaction, camera linking trickier
+---
 
-**Decision**: Multiple canvases (like OrthoViewer) - simpler, proven pattern, independent pan/zoom per tile.
+## Implementation Phases
+
+### Phase 1: MVP
+1. Create `tiled_viewer.py` with `TiledViewer` and `TileWidget`
+2. Implement `FlowLayout` for tile arrangement
+3. Basic Vispy rendering per tile (reuse `CompositeImageVisual`)
+4. Pagination (load/unload pages)
+5. Tile size slider
+
+### Phase 2: Contrast & Info
+6. Per-tile context menu (right-click)
+7. Contrast adjustment (reuse `ContrastDialog`)
+8. Auto-contrast all button
+9. Info labels with filename
+
+### Phase 3: Integration
+10. Modify `Toolbar.dropEvent()` for multi-file trigger
+11. "Open in Viewer" action (spawn `ImageWindow`)
+12. Keyboard shortcuts
+
+### Phase 4: Polish
+13. Status bar with page/count info
+14. Tooltips with full path and metadata
+15. Remember settings (QSettings)
+16. Error handling for failed loads
