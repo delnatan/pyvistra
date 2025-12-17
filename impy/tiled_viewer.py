@@ -12,6 +12,7 @@ import numpy as np
 from qtpy.QtCore import Qt, QRect, QPoint, QSize
 from qtpy.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QFrame,
     QHBoxLayout,
@@ -29,6 +30,7 @@ from qtpy.QtWidgets import (
     QWidget,
     QWidgetItem,
 )
+from superqt import QRangeSlider
 from vispy import scene
 
 from .io import load_image
@@ -141,6 +143,14 @@ class TileWidget(QFrame):
         self.meta = None
         self.file_path = None
 
+        # Current view state (for info label)
+        self._current_t = 0
+        self._current_z = 0
+        self._current_mode = "composite"
+        self._current_channel = 0
+        self._is_projection = False
+        self._proj_range = (0, 0)
+
         # Setup UI
         self._setup_ui()
 
@@ -177,14 +187,14 @@ class TileWidget(QFrame):
         self.canvas.native.setMinimumSize(50, 50)
         layout.addWidget(self.canvas.native, 1)
 
-        # Info label
+        # Info label (shows filename + view state)
         self.info_label = QLabel("")
         self.info_label.setStyleSheet(
             "color: #aaa; font-size: 10px; padding: 2px; background: transparent;"
         )
         self.info_label.setAlignment(Qt.AlignCenter)
         self.info_label.setWordWrap(True)
-        self.info_label.setFixedHeight(18)
+        self.info_label.setFixedHeight(32)  # Two lines
         layout.addWidget(self.info_label, 0)
 
         # Renderer (created when data is loaded)
@@ -194,12 +204,12 @@ class TileWidget(QFrame):
 
     def _update_size(self):
         """Update widget size based on tile_size."""
-        label_height = 18
+        label_height = 32
         total_height = self._tile_size + label_height + 8  # margins + spacing
         self.setFixedSize(self._tile_size, total_height)
 
     def sizeHint(self):
-        label_height = 18
+        label_height = 32
         total_height = self._tile_size + label_height + 8
         return QSize(self._tile_size, total_height)
 
@@ -209,6 +219,12 @@ class TileWidget(QFrame):
         self._update_size()
         if self.renderer is not None:
             self._fit_view()
+
+    def get_shape(self):
+        """Return image shape (T, Z, C, Y, X) or None if not loaded."""
+        if self.data is not None:
+            return self.data.shape
+        return None
 
     def load(self, path):
         """Load image from path."""
@@ -221,6 +237,7 @@ class TileWidget(QFrame):
 
             # Display first frame/slice (middle Z)
             z_mid = self.data.shape[1] // 2
+            self._current_z = z_mid
             self.renderer.update_slice(0, z_mid)
             self._fit_view()
             self._update_info()
@@ -240,23 +257,98 @@ class TileWidget(QFrame):
         self.data = None
         self.meta = None
 
+    def update_view(self, t_idx=0, z_idx=None, mode="composite", channel_idx=0,
+                    projection=False, proj_range=None):
+        """
+        Update the displayed slice with global settings.
+        Handles bounds checking for this image's dimensions.
+        """
+        if self.renderer is None or self.data is None:
+            return
+
+        T, Z, C, H, W = self.data.shape
+
+        # Bounds check
+        t_idx = min(t_idx, T - 1)
+
+        if projection and proj_range is not None:
+            # Clamp projection range to this image's Z extent
+            z_min = min(proj_range[0], Z - 1)
+            z_max = min(proj_range[1], Z - 1)
+            z_slice = slice(z_min, z_max + 1)
+            self._is_projection = True
+            self._proj_range = (z_min, z_max)
+        else:
+            z_idx = min(z_idx if z_idx is not None else 0, Z - 1)
+            z_slice = z_idx
+            self._is_projection = False
+            self._current_z = z_idx
+
+        self._current_t = t_idx
+        self._current_mode = mode
+        self._current_channel = min(channel_idx, C - 1)
+
+        # Update renderer mode
+        self.renderer.set_mode(mode)
+        if mode == "single":
+            self.renderer.set_active_channel(self._current_channel)
+
+        # Update slice
+        self.renderer.update_slice(t_idx, z_slice)
+        self.canvas.update()
+        self._update_info()
+
     def _fit_view(self):
         """Reset camera to fit image."""
         if self.data is not None:
             _, _, _, h, w = self.data.shape
             self.view.camera.set_range(x=(0, w), y=(0, h), margin=0.02)
             self.view.camera.flip = (False, True, False)
+            self.canvas.update()
 
     def _update_info(self):
-        """Update info label with filename."""
-        if self.file_path:
-            name = Path(self.file_path).stem
-            # Truncate if too long
-            max_len = self._tile_size // 8
-            if len(name) > max_len:
-                name = name[: max_len - 2] + ".."
+        """Update info label with filename and view state."""
+        if not self.file_path or self.data is None:
+            return
+
+        name = Path(self.file_path).stem
+        # Truncate filename if too long
+        max_len = self._tile_size // 7
+        if len(name) > max_len:
+            name = name[: max_len - 2] + ".."
+
+        T, Z, C, H, W = self.data.shape
+
+        # Build state string
+        state_parts = []
+
+        # Z info
+        if Z > 1:
+            if self._is_projection:
+                state_parts.append(f"z:{self._proj_range[0]}-{self._proj_range[1]} (max)")
+            else:
+                state_parts.append(f"z:{self._current_z}/{Z-1}")
+
+        # Channel info (only in single mode or if multiple channels)
+        if C > 1:
+            if self._current_mode == "single":
+                state_parts.append(f"ch:{self._current_channel}/{C-1}")
+            else:
+                state_parts.append(f"{C}ch")
+
+        # Time info
+        if T > 1:
+            state_parts.append(f"t:{self._current_t}/{T-1}")
+
+        state_str = " | ".join(state_parts) if state_parts else ""
+
+        # Format: filename on first line, state on second
+        if state_str:
+            self.info_label.setText(f"{name}\n{state_str}")
+        else:
             self.info_label.setText(name)
-            self.info_label.setToolTip(self.file_path)
+
+        self.info_label.setToolTip(self.file_path)
 
     def _show_context_menu(self, pos):
         """Show right-click context menu."""
@@ -273,7 +365,7 @@ class TileWidget(QFrame):
         menu.addSeparator()
 
         # Reset view
-        reset_action = menu.addAction("Reset View")
+        reset_action = menu.addAction("Reset View (A)")
         reset_action.triggered.connect(self._fit_view)
 
         menu.addSeparator()
@@ -354,6 +446,19 @@ class TiledViewer(QMainWindow):
         self.current_page = 0
         self.tile_size = 200  # Default tile size in pixels
 
+        # Global view state
+        self.t_idx = 0
+        self.z_idx = 0
+        self.mode = "composite"
+        self.channel_idx = 0
+        self.z_projection = False
+        self.z_proj_range = (0, 0)
+
+        # Detected max dimensions across all images (populated on first load)
+        self.max_T = 1
+        self.max_Z = 1
+        self.max_C = 1
+
         self.tile_widgets = []
 
         self._setup_ui()
@@ -370,35 +475,34 @@ class TiledViewer(QMainWindow):
         main_layout.setContentsMargins(5, 5, 5, 5)
         main_layout.setSpacing(5)
 
-        # Toolbar area
-        toolbar = QWidget()
-        toolbar_layout = QHBoxLayout(toolbar)
-        toolbar_layout.setContentsMargins(5, 5, 5, 5)
+        # === Toolbar Row 1: Page navigation, tiles/page, tile size ===
+        toolbar1 = QWidget()
+        toolbar1_layout = QHBoxLayout(toolbar1)
+        toolbar1_layout.setContentsMargins(5, 5, 5, 5)
 
         # Page navigation
         self.prev_btn = QPushButton("<")
         self.prev_btn.setFixedWidth(30)
         self.prev_btn.clicked.connect(self._prev_page)
-        toolbar_layout.addWidget(self.prev_btn)
+        toolbar1_layout.addWidget(self.prev_btn)
 
         self.page_label = QLabel("Page 1 / 1")
         self.page_label.setAlignment(Qt.AlignCenter)
         self.page_label.setFixedWidth(100)
-        toolbar_layout.addWidget(self.page_label)
+        toolbar1_layout.addWidget(self.page_label)
 
         self.next_btn = QPushButton(">")
         self.next_btn.setFixedWidth(30)
         self.next_btn.clicked.connect(self._next_page)
-        toolbar_layout.addWidget(self.next_btn)
+        toolbar1_layout.addWidget(self.next_btn)
 
-        toolbar_layout.addSpacing(20)
+        toolbar1_layout.addSpacing(20)
 
         # Tiles per page
-        toolbar_layout.addWidget(QLabel("Tiles/page:"))
+        toolbar1_layout.addWidget(QLabel("Tiles/page:"))
         self.per_page_combo = QComboBox()
         for n in self.TILES_PER_PAGE_OPTIONS:
             self.per_page_combo.addItem(str(n), n)
-        # Set current value
         idx = (
             self.TILES_PER_PAGE_OPTIONS.index(self.tiles_per_page)
             if self.tiles_per_page in self.TILES_PER_PAGE_OPTIONS
@@ -406,33 +510,112 @@ class TiledViewer(QMainWindow):
         )
         self.per_page_combo.setCurrentIndex(idx)
         self.per_page_combo.currentIndexChanged.connect(self._on_per_page_changed)
-        toolbar_layout.addWidget(self.per_page_combo)
+        toolbar1_layout.addWidget(self.per_page_combo)
 
-        toolbar_layout.addSpacing(20)
+        toolbar1_layout.addSpacing(20)
 
         # Tile size slider
-        toolbar_layout.addWidget(QLabel("Tile size:"))
+        toolbar1_layout.addWidget(QLabel("Tile size:"))
         self.size_slider = QSlider(Qt.Horizontal)
         self.size_slider.setRange(100, 400)
         self.size_slider.setValue(self.tile_size)
         self.size_slider.setFixedWidth(150)
         self.size_slider.valueChanged.connect(self._on_tile_size_changed)
-        toolbar_layout.addWidget(self.size_slider)
+        toolbar1_layout.addWidget(self.size_slider)
 
         self.size_label = QLabel(f"{self.tile_size}px")
         self.size_label.setFixedWidth(50)
-        toolbar_layout.addWidget(self.size_label)
+        toolbar1_layout.addWidget(self.size_label)
 
-        toolbar_layout.addSpacing(20)
+        toolbar1_layout.addStretch()
+
+        main_layout.addWidget(toolbar1)
+
+        # === Toolbar Row 2: Mode, Channel, Z controls ===
+        toolbar2 = QWidget()
+        toolbar2_layout = QHBoxLayout(toolbar2)
+        toolbar2_layout.setContentsMargins(5, 2, 5, 5)
+
+        # Mode selector
+        toolbar2_layout.addWidget(QLabel("Mode:"))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["Composite", "Single Channel"])
+        self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+        toolbar2_layout.addWidget(self.mode_combo)
+
+        toolbar2_layout.addSpacing(10)
+
+        # Channel selector (hidden initially)
+        self.channel_widget = QWidget()
+        channel_layout = QHBoxLayout(self.channel_widget)
+        channel_layout.setContentsMargins(0, 0, 0, 0)
+        channel_layout.addWidget(QLabel("Channel:"))
+        self.channel_slider = QSlider(Qt.Horizontal)
+        self.channel_slider.setRange(0, 0)
+        self.channel_slider.setFixedWidth(80)
+        self.channel_slider.valueChanged.connect(self._on_channel_changed)
+        channel_layout.addWidget(self.channel_slider)
+        self.channel_label = QLabel("0")
+        self.channel_label.setFixedWidth(20)
+        channel_layout.addWidget(self.channel_label)
+        self.channel_widget.setVisible(False)
+        toolbar2_layout.addWidget(self.channel_widget)
+
+        toolbar2_layout.addSpacing(20)
+
+        # Z controls
+        self.z_widget = QWidget()
+        z_layout = QHBoxLayout(self.z_widget)
+        z_layout.setContentsMargins(0, 0, 0, 0)
+
+        z_layout.addWidget(QLabel("Z:"))
+        self.z_slider = QSlider(Qt.Horizontal)
+        self.z_slider.setRange(0, 0)
+        self.z_slider.setFixedWidth(100)
+        self.z_slider.valueChanged.connect(self._on_z_changed)
+        z_layout.addWidget(self.z_slider)
+        self.z_label = QLabel("0")
+        self.z_label.setFixedWidth(25)
+        z_layout.addWidget(self.z_label)
+
+        # Max projection checkbox
+        self.proj_check = QCheckBox("Max Proj")
+        self.proj_check.toggled.connect(self._on_projection_toggled)
+        z_layout.addWidget(self.proj_check)
+
+        # Projection range slider (hidden initially)
+        self.proj_range_widget = QWidget()
+        proj_range_layout = QHBoxLayout(self.proj_range_widget)
+        proj_range_layout.setContentsMargins(0, 0, 0, 0)
+        self.proj_range_slider = QRangeSlider(Qt.Horizontal)
+        self.proj_range_slider.setRange(0, 0)
+        self.proj_range_slider.setValue((0, 0))
+        self.proj_range_slider.setFixedWidth(100)
+        self.proj_range_slider.valueChanged.connect(self._on_proj_range_changed)
+        proj_range_layout.addWidget(self.proj_range_slider)
+        self.proj_range_label = QLabel("0-0")
+        self.proj_range_label.setFixedWidth(40)
+        proj_range_layout.addWidget(self.proj_range_label)
+        self.proj_range_widget.setVisible(False)
+        z_layout.addWidget(self.proj_range_widget)
+
+        toolbar2_layout.addWidget(self.z_widget)
+
+        toolbar2_layout.addSpacing(20)
 
         # Auto contrast all button
-        self.auto_all_btn = QPushButton("Auto All")
+        self.auto_all_btn = QPushButton("Auto All (C)")
         self.auto_all_btn.clicked.connect(self._auto_contrast_all)
-        toolbar_layout.addWidget(self.auto_all_btn)
+        toolbar2_layout.addWidget(self.auto_all_btn)
 
-        toolbar_layout.addStretch()
+        # Reset all views button
+        self.reset_all_btn = QPushButton("Reset Views (A)")
+        self.reset_all_btn.clicked.connect(self._reset_all_views)
+        toolbar2_layout.addWidget(self.reset_all_btn)
 
-        main_layout.addWidget(toolbar)
+        toolbar2_layout.addStretch()
+
+        main_layout.addWidget(toolbar2)
 
         # Scroll area for tiles
         self.scroll_area = QScrollArea()
@@ -472,6 +655,62 @@ class TiledViewer(QMainWindow):
             f"Showing {start}-{end} of {len(self.image_paths)} images"
         )
 
+    def _update_dimension_controls(self):
+        """Update dimension sliders based on loaded tiles."""
+        # Find max dimensions across all loaded tiles
+        max_T, max_Z, max_C = 1, 1, 1
+        for tile in self.tile_widgets:
+            shape = tile.get_shape()
+            if shape:
+                T, Z, C, H, W = shape
+                max_T = max(max_T, T)
+                max_Z = max(max_Z, Z)
+                max_C = max(max_C, C)
+
+        self.max_T = max_T
+        self.max_Z = max_Z
+        self.max_C = max_C
+
+        # Update Z slider
+        if max_Z > 1:
+            self.z_slider.setRange(0, max_Z - 1)
+            self.z_slider.setValue(min(self.z_idx, max_Z - 1))
+            self.proj_range_slider.setRange(0, max_Z - 1)
+            self.proj_range_slider.setValue((0, max_Z - 1))
+            self.z_proj_range = (0, max_Z - 1)
+            self.z_widget.setVisible(True)
+        else:
+            self.z_widget.setVisible(False)
+
+        # Update channel slider
+        if max_C > 1:
+            self.channel_slider.setRange(0, max_C - 1)
+            self.channel_slider.setValue(min(self.channel_idx, max_C - 1))
+            # Show channel widget if in single mode
+            self.channel_widget.setVisible(self.mode == "single")
+        else:
+            self.channel_widget.setVisible(False)
+
+        self._update_labels()
+
+    def _update_labels(self):
+        """Update dimension labels."""
+        self.z_label.setText(str(self.z_idx))
+        self.channel_label.setText(str(self.channel_idx))
+        self.proj_range_label.setText(f"{self.z_proj_range[0]}-{self.z_proj_range[1]}")
+
+    def _apply_global_settings(self):
+        """Apply current global settings to all tiles."""
+        for tile in self.tile_widgets:
+            tile.update_view(
+                t_idx=self.t_idx,
+                z_idx=self.z_idx,
+                mode=self.mode,
+                channel_idx=self.channel_idx,
+                projection=self.z_projection,
+                proj_range=self.z_proj_range if self.z_projection else None
+            )
+
     def _load_current_page(self):
         """Load tiles for current page."""
         # Clear existing tiles
@@ -487,6 +726,12 @@ class TiledViewer(QMainWindow):
             tile.load(path)
             self.flow_layout.addWidget(tile)
             self.tile_widgets.append(tile)
+
+        # Update dimension controls based on loaded images
+        self._update_dimension_controls()
+
+        # Apply current global settings
+        self._apply_global_settings()
 
         # Update UI
         self._update_page_controls()
@@ -533,10 +778,49 @@ class TiledViewer(QMainWindow):
         # Trigger reflow
         self.flow_container.adjustSize()
 
+    def _on_mode_changed(self, index):
+        """Handle mode change."""
+        self.mode = "composite" if index == 0 else "single"
+        # Show/hide channel selector
+        self.channel_widget.setVisible(self.mode == "single" and self.max_C > 1)
+        self._apply_global_settings()
+
+    def _on_channel_changed(self, value):
+        """Handle channel slider change."""
+        self.channel_idx = value
+        self.channel_label.setText(str(value))
+        self._apply_global_settings()
+
+    def _on_z_changed(self, value):
+        """Handle Z slider change."""
+        self.z_idx = value
+        self.z_label.setText(str(value))
+        if not self.z_projection:
+            self._apply_global_settings()
+
+    def _on_projection_toggled(self, checked):
+        """Handle projection checkbox toggle."""
+        self.z_projection = checked
+        self.z_slider.setVisible(not checked)
+        self.proj_range_widget.setVisible(checked)
+        self._apply_global_settings()
+
+    def _on_proj_range_changed(self, value):
+        """Handle projection range slider change."""
+        self.z_proj_range = value
+        self.proj_range_label.setText(f"{value[0]}-{value[1]}")
+        if self.z_projection:
+            self._apply_global_settings()
+
     def _auto_contrast_all(self):
         """Apply auto-contrast to all visible tiles."""
         for tile in self.tile_widgets:
             tile._auto_contrast()
+
+    def _reset_all_views(self):
+        """Reset view (fit image) for all tiles."""
+        for tile in self.tile_widgets:
+            tile._fit_view()
 
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts."""
@@ -553,6 +837,10 @@ class TiledViewer(QMainWindow):
             self.current_page = self._total_pages() - 1
             self._load_current_page()
         elif key == Qt.Key_A:
+            # Reset all views (fit to tile)
+            self._reset_all_views()
+        elif key == Qt.Key_C:
+            # Auto contrast all
             self._auto_contrast_all()
         elif key == Qt.Key_Plus or key == Qt.Key_Equal:
             # Increase tile size
@@ -562,6 +850,26 @@ class TiledViewer(QMainWindow):
             # Decrease tile size
             new_size = max(100, self.tile_size - 25)
             self.size_slider.setValue(new_size)
+        elif key == Qt.Key_Up:
+            # Next Z slice
+            if self.max_Z > 1 and not self.z_projection:
+                new_z = min(self.z_idx + 1, self.max_Z - 1)
+                self.z_slider.setValue(new_z)
+        elif key == Qt.Key_Down:
+            # Previous Z slice
+            if self.max_Z > 1 and not self.z_projection:
+                new_z = max(self.z_idx - 1, 0)
+                self.z_slider.setValue(new_z)
+        elif key == Qt.Key_BracketLeft:
+            # Previous channel
+            if self.max_C > 1 and self.mode == "single":
+                new_c = max(self.channel_idx - 1, 0)
+                self.channel_slider.setValue(new_c)
+        elif key == Qt.Key_BracketRight:
+            # Next channel
+            if self.max_C > 1 and self.mode == "single":
+                new_c = min(self.channel_idx + 1, self.max_C - 1)
+                self.channel_slider.setValue(new_c)
         else:
             super().keyPressEvent(event)
 
