@@ -241,7 +241,7 @@ class ContrastDialog(QDialog):
         super().__init__(parent)
         self.viewer = viewer
         self.setWindowTitle("Brightness / Contrast")
-        self.resize(400, 250)
+        self.resize(450, 280)
         self.setWindowFlags(Qt.Tool)
 
         layout = QVBoxLayout(self)
@@ -272,10 +272,43 @@ class ContrastDialog(QDialog):
         row_cmap.addWidget(self.cmap_combo)
         layout.addLayout(row_cmap)
 
-        # 2. Interactive Histogram
+        # 2. Interactive Histogram with Min/Max Spinboxes
+        hist_layout = QHBoxLayout()
+        hist_layout.setSpacing(6)
+
+        # Min spinbox
+        min_label = QLabel("Min:")
+        min_label.setStyleSheet("color: #AAA; font-size: 10px;")
+        hist_layout.addWidget(min_label)
+
+        self.min_spin = QDoubleSpinBox()
+        self.min_spin.setDecimals(1)
+        self.min_spin.setRange(-1e9, 1e9)
+        self.min_spin.setSingleStep(10)
+        self.min_spin.setFixedWidth(75)
+        self.min_spin.setToolTip("Minimum intensity")
+        self.min_spin.valueChanged.connect(self.on_min_spin_changed)
+        hist_layout.addWidget(self.min_spin)
+
         self.hist_widget = HistogramWidget()
-        self.hist_widget.climChanged.connect(self.on_clim_changed)
-        layout.addWidget(self.hist_widget)
+        self.hist_widget.climChanged.connect(self.on_histogram_clim_changed)
+        hist_layout.addWidget(self.hist_widget, 1)
+
+        # Max spinbox
+        max_label = QLabel("Max:")
+        max_label.setStyleSheet("color: #AAA; font-size: 10px;")
+        hist_layout.addWidget(max_label)
+
+        self.max_spin = QDoubleSpinBox()
+        self.max_spin.setDecimals(1)
+        self.max_spin.setRange(-1e9, 1e9)
+        self.max_spin.setSingleStep(10)
+        self.max_spin.setFixedWidth(75)
+        self.max_spin.setToolTip("Maximum intensity")
+        self.max_spin.valueChanged.connect(self.on_max_spin_changed)
+        hist_layout.addWidget(self.max_spin)
+
+        layout.addLayout(hist_layout)
 
         # 3. Gamma Control
         gamma_layout = QHBoxLayout()
@@ -354,10 +387,12 @@ class ContrastDialog(QDialog):
             # Get current clim from renderer
             curr_min, curr_max = self.viewer.renderer.get_clim(c_idx)
 
-            # Update widget handles without triggering signal loop
-            self.hist_widget.blockSignals(True)
+            # Update histogram and spinboxes without triggering signal loop
+            self.block_clim_signals(True)
             self.hist_widget.set_clim(curr_min, curr_max)
-            self.hist_widget.blockSignals(False)
+            self.min_spin.setValue(curr_min)
+            self.max_spin.setValue(curr_max)
+            self.block_clim_signals(False)
 
             # Update Gamma
             gamma = self.viewer.renderer.get_gamma(c_idx)
@@ -365,6 +400,12 @@ class ContrastDialog(QDialog):
             self.gamma_spin.setValue(gamma)
             self.gamma_slider.setValue(int(gamma * 100))
             self.block_gamma_signals(False)
+
+    def block_clim_signals(self, block):
+        """Block or unblock signals from clim-related widgets."""
+        self.hist_widget.blockSignals(block)
+        self.min_spin.blockSignals(block)
+        self.max_spin.blockSignals(block)
 
     def block_gamma_signals(self, block):
         self.gamma_slider.blockSignals(block)
@@ -388,10 +429,45 @@ class ContrastDialog(QDialog):
         self.viewer.renderer.set_gamma(c_idx, gamma)
         self.viewer.canvas.update()
 
-    def on_clim_changed(self, vmin, vmax):
+    def on_histogram_clim_changed(self, vmin, vmax):
+        """Handle histogram clim change (from dragging handles)."""
+        # Update spinboxes
+        self.min_spin.blockSignals(True)
+        self.max_spin.blockSignals(True)
+        self.min_spin.setValue(vmin)
+        self.max_spin.setValue(vmax)
+        self.min_spin.blockSignals(False)
+        self.max_spin.blockSignals(False)
+        # Update renderer
         c_idx = self.combo.currentIndex()
         self.viewer.renderer.set_clim(c_idx, vmin, vmax)
         self.viewer.canvas.update()
+
+    def on_min_spin_changed(self, value):
+        """Handle min spinbox change."""
+        max_val = self.max_spin.value()
+        if value < max_val:
+            # Update histogram
+            self.hist_widget.blockSignals(True)
+            self.hist_widget.set_clim(value, max_val)
+            self.hist_widget.blockSignals(False)
+            # Update renderer
+            c_idx = self.combo.currentIndex()
+            self.viewer.renderer.set_clim(c_idx, value, max_val)
+            self.viewer.canvas.update()
+
+    def on_max_spin_changed(self, value):
+        """Handle max spinbox change."""
+        min_val = self.min_spin.value()
+        if value > min_val:
+            # Update histogram
+            self.hist_widget.blockSignals(True)
+            self.hist_widget.set_clim(min_val, value)
+            self.hist_widget.blockSignals(False)
+            # Update renderer
+            c_idx = self.combo.currentIndex()
+            self.viewer.renderer.set_clim(c_idx, min_val, value)
+            self.viewer.canvas.update()
 
     def on_colormap_changed(self, cmap_name):
         c_idx = self.combo.currentIndex()
@@ -436,42 +512,47 @@ class ContrastDialog(QDialog):
 
         if self.chk_all_channels.isChecked():
             # Apply to all channels
-            for c_idx in range(self.combo.count()):
-                plane = cache[c_idx]
+            for ch_idx in range(self.combo.count()):
+                plane = cache[ch_idx]
                 # Ignore zeros (background)
                 valid_data = plane[plane > 0]
                 if valid_data.size == 0:
-                    valid_data = plane # Fallback if all zeros
-                
+                    valid_data = plane  # Fallback if all zeros
+
                 mn, mx = map(float, np.nanpercentile(valid_data, (self.pct_low, self.pct_high)))
-                
+
                 # Update Renderer
-                self.viewer.renderer.set_clim(c_idx, mn, mx)
-                
-                # Update Widget
-                self.hist_widget.blockSignals(True)
-                self.hist_widget.set_clim(mn, mx)
-                self.hist_widget.blockSignals(False)   
-            self.viewer.canvas.update() 
+                self.viewer.renderer.set_clim(ch_idx, mn, mx)
+
+            # Update widgets for currently selected channel
+            curr_min, curr_max = self.viewer.renderer.get_clim(c_idx)
+            self.block_clim_signals(True)
+            self.hist_widget.set_clim(curr_min, curr_max)
+            self.min_spin.setValue(curr_min)
+            self.max_spin.setValue(curr_max)
+            self.block_clim_signals(False)
+            self.viewer.canvas.update()
             return
-        
+
         if cache is not None:
             plane = cache[c_idx]
             # Ignore zeros (background)
             valid_data = plane[plane > 0]
             if valid_data.size == 0:
-                valid_data = plane # Fallback if all zeros
-            
+                valid_data = plane  # Fallback if all zeros
+
             mn, mx = map(float, np.nanpercentile(valid_data, (self.pct_low, self.pct_high)))
-            
+
             # Update Renderer
             self.viewer.renderer.set_clim(c_idx, mn, mx)
             self.viewer.canvas.update()
-            
-            # Update Widget
-            self.hist_widget.blockSignals(True)
+
+            # Update widgets
+            self.block_clim_signals(True)
             self.hist_widget.set_clim(mn, mx)
-            self.hist_widget.blockSignals(False)
+            self.min_spin.setValue(mn)
+            self.max_spin.setValue(mx)
+            self.block_clim_signals(False)
 
 
 from qtpy.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, QScrollArea, QFrame, QSizePolicy
@@ -660,6 +741,7 @@ class ChannelRow(QWidget):
     - Visibility checkbox
     - Color swatch (clickable for colormap selection)
     - Channel name label
+    - Min/Max spinboxes for intensity range
     - Compact histogram
     - Gamma adjustment
     """
@@ -675,7 +757,7 @@ class ChannelRow(QWidget):
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(6)
+        layout.setSpacing(4)
 
         # Visibility checkbox
         self.chk_visible = QCheckBox()
@@ -695,15 +777,35 @@ class ChannelRow(QWidget):
 
         # Channel name label
         self.name_label = QLabel(channel_name)
-        self.name_label.setFixedWidth(60)
+        self.name_label.setFixedWidth(40)
         self.name_label.setStyleSheet("color: #EEE; font-size: 11px;")
         self.name_label.setToolTip(channel_name)  # Show full name on hover
         layout.addWidget(self.name_label)
 
+        # Min spinbox for contrast
+        self.min_spin = QDoubleSpinBox()
+        self.min_spin.setDecimals(1)
+        self.min_spin.setRange(-1e9, 1e9)
+        self.min_spin.setSingleStep(10)
+        self.min_spin.setFixedWidth(65)
+        self.min_spin.setToolTip("Minimum intensity")
+        self.min_spin.valueChanged.connect(self._on_min_changed)
+        layout.addWidget(self.min_spin)
+
         # Compact histogram
         self.histogram = CompactHistogramWidget()
-        self.histogram.climChanged.connect(self._on_clim_changed)
+        self.histogram.climChanged.connect(self._on_histogram_clim_changed)
         layout.addWidget(self.histogram, 1)
+
+        # Max spinbox for contrast
+        self.max_spin = QDoubleSpinBox()
+        self.max_spin.setDecimals(1)
+        self.max_spin.setRange(-1e9, 1e9)
+        self.max_spin.setSingleStep(10)
+        self.max_spin.setFixedWidth(65)
+        self.max_spin.setToolTip("Maximum intensity")
+        self.max_spin.valueChanged.connect(self._on_max_changed)
+        layout.addWidget(self.max_spin)
 
         # Gamma spinbox
         gamma_label = QLabel("γ")
@@ -715,7 +817,7 @@ class ChannelRow(QWidget):
         self.gamma_spin.setRange(0.1, 4.0)
         self.gamma_spin.setSingleStep(0.1)
         self.gamma_spin.setValue(1.0)
-        self.gamma_spin.setFixedWidth(55)
+        self.gamma_spin.setFixedWidth(50)
         self.gamma_spin.setToolTip("Gamma correction")
         self.gamma_spin.valueChanged.connect(self._on_gamma_changed)
         layout.addWidget(self.gamma_spin)
@@ -731,7 +833,36 @@ class ChannelRow(QWidget):
     def _on_visibility_changed(self, checked):
         self.visibilityChanged.emit(self.channel_idx, checked)
 
-    def _on_clim_changed(self, vmin, vmax):
+    def _on_min_changed(self, value):
+        """Handle min spinbox change."""
+        max_val = self.max_spin.value()
+        if value < max_val:
+            self.climChanged.emit(self.channel_idx, value, max_val)
+            # Update histogram display
+            self.histogram.blockSignals(True)
+            self.histogram.set_clim(value, max_val)
+            self.histogram.blockSignals(False)
+
+    def _on_max_changed(self, value):
+        """Handle max spinbox change."""
+        min_val = self.min_spin.value()
+        if value > min_val:
+            self.climChanged.emit(self.channel_idx, min_val, value)
+            # Update histogram display
+            self.histogram.blockSignals(True)
+            self.histogram.set_clim(min_val, value)
+            self.histogram.blockSignals(False)
+
+    def _on_histogram_clim_changed(self, vmin, vmax):
+        """Handle histogram clim change (from dragging handles)."""
+        # Update spinboxes
+        self.min_spin.blockSignals(True)
+        self.max_spin.blockSignals(True)
+        self.min_spin.setValue(vmin)
+        self.max_spin.setValue(vmax)
+        self.min_spin.blockSignals(False)
+        self.max_spin.blockSignals(False)
+        # Emit signal to parent
         self.climChanged.emit(self.channel_idx, vmin, vmax)
 
     def _on_gamma_changed(self, value):
@@ -758,10 +889,16 @@ class ChannelRow(QWidget):
         self.histogram.set_data(data_slice, color)
 
     def set_clim(self, vmin, vmax):
-        """Update contrast limits display."""
+        """Update contrast limits display (histogram and spinboxes)."""
         self.histogram.blockSignals(True)
+        self.min_spin.blockSignals(True)
+        self.max_spin.blockSignals(True)
         self.histogram.set_clim(vmin, vmax)
+        self.min_spin.setValue(vmin)
+        self.max_spin.setValue(vmax)
         self.histogram.blockSignals(False)
+        self.min_spin.blockSignals(False)
+        self.max_spin.blockSignals(False)
 
     def set_visible_state(self, visible):
         """Update checkbox state without emitting signal."""
@@ -779,7 +916,7 @@ class ChannelRow(QWidget):
 class ChannelPanel(QDialog):
     """
     Floating dialog that displays all channels stacked vertically,
-    each with visibility toggle, colormap selector, and histogram.
+    each with visibility toggle, colormap selector, histogram, and intensity spinboxes.
     """
 
     def __init__(self, viewer, parent=None):
@@ -787,7 +924,7 @@ class ChannelPanel(QDialog):
         self.viewer = viewer
         self.setWindowTitle("Channels")
         self.setWindowFlags(Qt.Tool)
-        self.resize(350, min(200 + viewer.C * 60, 500))
+        self.resize(480, min(200 + viewer.C * 60, 500))
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
