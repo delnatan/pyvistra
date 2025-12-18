@@ -134,6 +134,12 @@ class TiledVisualProxy:
         """Get visibility state for a channel."""
         return self._channel_visibility.get(channel_idx, True)
 
+    def set_clim(self, channel_idx, vmin, vmax):
+        """Set contrast limits for a channel across all tiles."""
+        for renderer in self._get_tile_renderers():
+            if channel_idx < len(renderer.layers):
+                renderer.set_clim(channel_idx, vmin, vmax)
+
     def get_aggregate_data(self, channel_idx):
         """
         Get aggregated intensity data for a channel across all tiles.
@@ -188,12 +194,9 @@ class TiledChannelRow(QWidget):
         super().__init__(parent)
         self.channel_idx = channel_idx
 
-        # Import Signal here to avoid issues
-        from qtpy.QtCore import Signal
-
         layout = QHBoxLayout(self)
         layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(6)
+        layout.setSpacing(4)
 
         # Visibility checkbox
         self.chk_visible = QCheckBox()
@@ -213,13 +216,34 @@ class TiledChannelRow(QWidget):
 
         # Channel name label
         self.name_label = QLabel(channel_name)
-        self.name_label.setFixedWidth(50)
+        self.name_label.setFixedWidth(40)
         self.name_label.setStyleSheet("color: #EEE; font-size: 11px;")
         layout.addWidget(self.name_label)
 
-        # Compact histogram (shows aggregate distribution)
+        # Min spinbox for contrast
+        self.min_spin = QDoubleSpinBox()
+        self.min_spin.setDecimals(1)
+        self.min_spin.setRange(-1e9, 1e9)
+        self.min_spin.setSingleStep(10)
+        self.min_spin.setFixedWidth(65)
+        self.min_spin.setToolTip("Minimum intensity (all tiles)")
+        self.min_spin.valueChanged.connect(self._on_min_changed)
+        layout.addWidget(self.min_spin)
+
+        # Compact histogram (shows aggregate distribution, interactive)
         self.histogram = CompactHistogramWidget()
+        self.histogram.climChanged.connect(self._on_histogram_clim_changed)
         layout.addWidget(self.histogram, 1)
+
+        # Max spinbox for contrast
+        self.max_spin = QDoubleSpinBox()
+        self.max_spin.setDecimals(1)
+        self.max_spin.setRange(-1e9, 1e9)
+        self.max_spin.setSingleStep(10)
+        self.max_spin.setFixedWidth(65)
+        self.max_spin.setToolTip("Maximum intensity (all tiles)")
+        self.max_spin.valueChanged.connect(self._on_max_changed)
+        layout.addWidget(self.max_spin)
 
         # Gamma spinbox
         gamma_label = QLabel("γ")
@@ -231,7 +255,7 @@ class TiledChannelRow(QWidget):
         self.gamma_spin.setRange(0.1, 4.0)
         self.gamma_spin.setSingleStep(0.1)
         self.gamma_spin.setValue(1.0)
-        self.gamma_spin.setFixedWidth(55)
+        self.gamma_spin.setFixedWidth(50)
         self.gamma_spin.setToolTip("Gamma correction (all tiles)")
         self.gamma_spin.valueChanged.connect(self._on_gamma_changed)
         layout.addWidget(self.gamma_spin)
@@ -242,12 +266,14 @@ class TiledChannelRow(QWidget):
         self._visibility_callback = None
         self._colormap_callback = None
         self._gamma_callback = None
+        self._clim_callback = None
 
-    def set_callbacks(self, visibility_cb, colormap_cb, gamma_cb):
+    def set_callbacks(self, visibility_cb, colormap_cb, gamma_cb, clim_cb=None):
         """Set callback functions for changes."""
         self._visibility_callback = visibility_cb
         self._colormap_callback = colormap_cb
         self._gamma_callback = gamma_cb
+        self._clim_callback = clim_cb
 
     def _update_color_swatch(self, color):
         """Update the color swatch button background."""
@@ -262,6 +288,39 @@ class TiledChannelRow(QWidget):
     def _on_gamma_changed(self, value):
         if self._gamma_callback:
             self._gamma_callback(self.channel_idx, value)
+
+    def _on_min_changed(self, value):
+        """Handle min spinbox change."""
+        max_val = self.max_spin.value()
+        if value < max_val and self._clim_callback:
+            self._clim_callback(self.channel_idx, value, max_val)
+            # Update histogram display
+            self.histogram.blockSignals(True)
+            self.histogram.set_clim(value, max_val)
+            self.histogram.blockSignals(False)
+
+    def _on_max_changed(self, value):
+        """Handle max spinbox change."""
+        min_val = self.min_spin.value()
+        if value > min_val and self._clim_callback:
+            self._clim_callback(self.channel_idx, min_val, value)
+            # Update histogram display
+            self.histogram.blockSignals(True)
+            self.histogram.set_clim(min_val, value)
+            self.histogram.blockSignals(False)
+
+    def _on_histogram_clim_changed(self, vmin, vmax):
+        """Handle histogram clim change (from dragging handles)."""
+        # Update spinboxes
+        self.min_spin.blockSignals(True)
+        self.max_spin.blockSignals(True)
+        self.min_spin.setValue(vmin)
+        self.max_spin.setValue(vmax)
+        self.min_spin.blockSignals(False)
+        self.max_spin.blockSignals(False)
+        # Notify parent
+        if self._clim_callback:
+            self._clim_callback(self.channel_idx, vmin, vmax)
 
     def _show_colormap_menu(self):
         """Show a popup menu for colormap selection."""
@@ -285,10 +344,16 @@ class TiledChannelRow(QWidget):
             self.histogram.set_data(data_slice, color)
 
     def set_clim(self, vmin, vmax):
-        """Update histogram display range."""
+        """Update histogram and spinbox display range."""
         self.histogram.blockSignals(True)
+        self.min_spin.blockSignals(True)
+        self.max_spin.blockSignals(True)
         self.histogram.set_clim(vmin, vmax)
+        self.min_spin.setValue(vmin)
+        self.max_spin.setValue(vmax)
         self.histogram.blockSignals(False)
+        self.min_spin.blockSignals(False)
+        self.max_spin.blockSignals(False)
 
     def set_visible_state(self, visible):
         """Update checkbox state without triggering callback."""
@@ -317,7 +382,7 @@ class TiledChannelPanel(QDialog):
 
         self.setWindowTitle("Channels (All Tiles)")
         self.setWindowFlags(Qt.Tool)
-        self.resize(380, min(180 + viewer.max_C * 55, 450))
+        self.resize(480, min(180 + viewer.max_C * 55, 450))
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -328,10 +393,10 @@ class TiledChannelPanel(QDialog):
         info_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(info_label)
 
-        # Note about per-tile contrast
+        # Note about global controls
         note_label = QLabel(
-            "<i>Note: Histogram shows aggregate intensity. "
-            "Contrast is per-tile (use Auto All).</i>"
+            "<i>Adjust min/max to set global contrast. "
+            "Use Auto All for per-tile optimization.</i>"
         )
         note_label.setStyleSheet("color: #888; font-size: 10px;")
         note_label.setWordWrap(True)
@@ -380,7 +445,8 @@ class TiledChannelPanel(QDialog):
             row.set_callbacks(
                 self._on_visibility_changed,
                 self._on_colormap_changed,
-                self._on_gamma_changed
+                self._on_gamma_changed,
+                self._on_clim_changed
             )
 
             self.channel_rows.append(row)
@@ -408,6 +474,11 @@ class TiledChannelPanel(QDialog):
     def _on_gamma_changed(self, channel_idx, gamma):
         """Handle gamma change for a channel."""
         self.proxy.set_gamma(channel_idx, gamma)
+        self._update_all_canvases()
+
+    def _on_clim_changed(self, channel_idx, vmin, vmax):
+        """Handle contrast limits change for a channel."""
+        self.proxy.set_clim(channel_idx, vmin, vmax)
         self._update_all_canvases()
 
     def _update_all_canvases(self):
