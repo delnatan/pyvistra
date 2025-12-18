@@ -1,4 +1,3 @@
-
 DARK_THEME = """
 /* Main Window & Background */
 QMainWindow, QWidget {
@@ -97,6 +96,10 @@ QListWidget::item:hover, QTreeWidget::item:hover {
 }
 
 /* Sliders */
+QSlider{
+ background-color: none;
+}
+
 QSlider::groove:horizontal {
     border: 1px solid #4b5563;
     height: 4px;
@@ -114,6 +117,15 @@ QSlider::handle:horizontal {
     border-radius: 7px;
 }
 
+QSlider::add-page:vertical {
+  background: none;
+  border: none;
+}
+
+QRangeSlider {
+      qproperty-barColor: #3b82f6;
+}
+
 QSlider::handle:horizontal:hover {
     background: #ffffff;
     border-color: #ffffff;
@@ -129,6 +141,22 @@ QRangeSlider {
     qproperty-barColor: #3b82f6;
 }
 
+QRangeSlider::groove:horizontal {
+    border: 1px solid #4b5563;
+    height: 4px;
+    background: #4b5563;
+    margin: 2px 0;
+    border-radius: 2px;
+}
+
+QRangeSlider::handle:horizontal {
+    background: #9ca3af;
+    border: 1px solid #9ca3af;
+    width: 14px;
+    height: 14px;
+    margin: -6px 0;
+    border-radius: 7px;
+}
 
 /* Menu Bar */
 QMenuBar {

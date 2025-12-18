@@ -15,21 +15,20 @@ from qtpy.QtWidgets import (
     QLabel,
     QMainWindow,
     QSlider,
-    QVBoxLayout,
-    QHBoxLayout,
-    QWidget,
     QToolBar,
+    QVBoxLayout,
+    QWidget,
 )
 from superqt import QRangeSlider
 from vispy import app, scene
 
-from .io import load_image, Numpy5DProxy, normalize_to_5d
-from .visuals import CompositeImageVisual
-from .widgets import ContrastDialog, MetadataDialog, ChannelPanel
+from .io import Numpy5DProxy, load_image, normalize_to_5d
 from .manager import manager
-from .rois import CoordinateROI, RectangleROI, CircleROI, LineROI
-from .roi_manager import get_roi_manager
 from .ortho import OrthoViewer
+from .roi_manager import get_roi_manager
+from .rois import CircleROI, CoordinateROI, LineROI, RectangleROI
+from .visuals import CompositeImageVisual
+from .widgets import ChannelPanel, ContrastDialog, MetadataDialog
 
 try:
     app.use_app(API_NAME)
@@ -41,7 +40,7 @@ class ImageWindow(QMainWindow):
     def __init__(self, data_or_path, title="Image"):
         super().__init__()
         self.setAttribute(Qt.WA_DeleteOnClose)
-        
+
         # 1. Load/Set Data
         if isinstance(data_or_path, str):
             self.filepath = data_or_path
@@ -50,14 +49,14 @@ class ImageWindow(QMainWindow):
         else:
             self.filepath = None
             # Normalize raw data using helper
-            # Note: ImageWindow doesn't take 'dims' arg directly yet, 
+            # Note: ImageWindow doesn't take 'dims' arg directly yet,
             # but usually it's called via imshow which does.
             # If instantiated directly, we use default heuristics (dims=None).
             if not isinstance(data_or_path, Numpy5DProxy):
-                 self.img_data = normalize_to_5d(data_or_path)
+                self.img_data = normalize_to_5d(data_or_path)
             else:
-                 self.img_data = data_or_path
-                 
+                self.img_data = data_or_path
+
             self.meta = {}
             filename = title
 
@@ -83,9 +82,7 @@ class ImageWindow(QMainWindow):
         self.layout.setSpacing(0)
 
         # 3. Vispy Canvas
-        self.canvas = scene.SceneCanvas(
-            keys=None, bgcolor="black", show=False
-        )
+        self.canvas = scene.SceneCanvas(keys=None, bgcolor="black", show=False)
         self.view = self.canvas.central_widget.add_view()
         self.view.camera = "panzoom"
         self.view.camera.aspect = 1
@@ -121,7 +118,7 @@ class ImageWindow(QMainWindow):
         self.contrast_dialog = None
         self.channel_panel = None
         self._setup_menu()
-        
+
         # 8. ROI State
         self.rois = []
         self.drawing_roi = None
@@ -136,7 +133,7 @@ class ImageWindow(QMainWindow):
         self.canvas.events.mouse_move.connect(self.on_mouse_move)
         self.canvas.events.mouse_press.connect(self.on_mouse_press)
         self.canvas.events.mouse_release.connect(self.on_mouse_release)
-        
+
         # Focus policy
         self.setFocusPolicy(Qt.StrongFocus)
 
@@ -147,7 +144,7 @@ class ImageWindow(QMainWindow):
         manager.unregister(self)
         get_roi_manager().remove_window(self)
         super().closeEvent(event)
-        
+
     def focusInEvent(self, event):
         get_roi_manager().set_active_window(self)
         super().focusInEvent(event)
@@ -180,9 +177,9 @@ class ImageWindow(QMainWindow):
     def set_data(self, new_data):
         """Update the image data in place."""
         if new_data.ndim != 5:
-             # Try to reshape or warn? For now assume 5D or compatible
-             pass
-        
+            # Try to reshape or warn? For now assume 5D or compatible
+            pass
+
         self.img_data = new_data
         # Update renderer data
         self.renderer.data = new_data
@@ -191,7 +188,7 @@ class ImageWindow(QMainWindow):
 
     def _setup_menu(self):
         menubar = self.menuBar()
-        
+
         # Adjust Menu
         adjust_menu = menubar.addMenu("Adjust")
         bc_action = QAction("Brightness/Contrast", self)
@@ -203,14 +200,14 @@ class ImageWindow(QMainWindow):
         channels_action.setShortcut("Shift+H")
         channels_action.triggered.connect(self.show_channel_panel)
         adjust_menu.addAction(channels_action)
-        
+
         # Image Menu
         image_menu = menubar.addMenu("Image")
         info_action = QAction("Image Info", self)
         info_action.setShortcut("Shift+I")
         info_action.triggered.connect(self.show_metadata_dialog)
         image_menu.addAction(info_action)
-        
+
         ortho_action = QAction("Ortho View", self)
         ortho_action.triggered.connect(self.show_ortho_view)
         image_menu.addAction(ortho_action)
@@ -220,7 +217,11 @@ class ImageWindow(QMainWindow):
         dlg.exec_()
 
     def show_ortho_view(self):
-        self.ortho_viewer = OrthoViewer(self.img_data, self.meta, title=f"Ortho View - {self.windowTitle()}")
+        self.ortho_viewer = OrthoViewer(
+            self.img_data,
+            self.meta,
+            title=f"Ortho View - {self.windowTitle()}",
+        )
         self.ortho_viewer.show()
 
     def update_cursor(self):
@@ -254,7 +255,7 @@ class ImageWindow(QMainWindow):
             return
 
         manager.active_tool = tool_name
-        
+
         # Update cursors in all windows
         for w in manager.get_all().values():
             w.update_cursor()
@@ -300,25 +301,24 @@ class ImageWindow(QMainWindow):
         if self.Z > 1:
             row = QHBoxLayout()
             row.addWidget(QLabel("Z-Pos"))
-            
+
             # Standard Slider
             self.z_slider = QSlider(Qt.Horizontal)
             self.z_slider.setRange(0, self.Z - 1)
             self.z_slider.valueChanged.connect(self.on_z_change)
             row.addWidget(self.z_slider)
-            
+
             self.z_label = QLabel("0")
-            self.z_label.setFixedWidth(30) # Fixed width to prevent jumping
+            self.z_label.setFixedWidth(30)  # Fixed width to prevent jumping
             self.z_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             row.addWidget(self.z_label)
-            
+
             # Projection Controls
             self.chk_proj = QCheckBox("Max Proj")
             self.chk_proj.toggled.connect(self.toggle_z_projection)
             self.z_range_slider_widget = QWidget()
             self.z_range_slider_layout = QHBoxLayout()
             self.z_range_slider_layout.setContentsMargins(0, 0, 0, 0)
-
             self.z_range_slider = QRangeSlider(Qt.Horizontal)
             self.z_range_slider_min_label = QLabel("0")
             self.z_range_slider_max_label = QLabel(f"{self.Z - 1}")
@@ -377,18 +377,18 @@ class ImageWindow(QMainWindow):
 
     def on_z_change(self, val):
         self.z_idx = val
-        if hasattr(self, 'z_label'):
+        if hasattr(self, "z_label"):
             self.z_label.setText(str(val))
         self.update_view()
 
     def update_view(self):
-        if hasattr(self, 'chk_proj') and self.chk_proj.isChecked():
+        if hasattr(self, "chk_proj") and self.chk_proj.isChecked():
             mn, mx = self.z_range_slider.value()
             z_slice = slice(mn, mx + 1)
             self.renderer.update_slice(self.t_idx, z_slice)
         else:
             self.renderer.update_slice(self.t_idx, self.z_idx)
-            
+
         self.canvas.update()
         if self.contrast_dialog and self.contrast_dialog.isVisible():
             self.contrast_dialog.refresh_ui()
@@ -403,26 +403,26 @@ class ImageWindow(QMainWindow):
     def on_mouse_press(self, event):
         tool = manager.active_tool
         x, y = self._map_event_to_image(event)
-        
+
         if tool == "pointer":
             # Hit Test (Reverse order to select top-most)
             hit_roi = None
             hit_handle = None
-            
+
             for roi in reversed(self.rois):
                 res = roi.hit_test((x, y))
                 if res:
                     hit_roi = roi
                     hit_handle = res
                     break
-            
+
             # Update Selection
             for roi in self.rois:
                 roi.select(roi is hit_roi)
-            
+
             # Notify Manager
             get_roi_manager().select_roi(hit_roi)
-                
+
             if hit_roi:
                 self.dragging_roi = hit_roi
                 self.drag_handle = hit_handle
@@ -431,9 +431,9 @@ class ImageWindow(QMainWindow):
             else:
                 self.canvas.update()
             return
-            
+
         self.start_pos = (x, y)
-        
+
         if tool == "coordinate":
             self.drawing_roi = CoordinateROI(self.view)
         elif tool == "rect":
@@ -442,7 +442,7 @@ class ImageWindow(QMainWindow):
             self.drawing_roi = CircleROI(self.view)
         elif tool == "line":
             self.drawing_roi = LineROI(self.view)
-            
+
         if self.drawing_roi:
             self.rois.append(self.drawing_roi)
             get_roi_manager().add_roi(self.drawing_roi)
@@ -466,7 +466,9 @@ class ImageWindow(QMainWindow):
                         except IndexError:
                             pass
                     val_str = ", ".join(vals)
-                    self.info_label.setText(f"X: {ix}  Y: {iy}  Val: [{val_str}]")
+                    self.info_label.setText(
+                        f"X: {ix}  Y: {iy}  Val: [{val_str}]"
+                    )
             else:
                 self.info_label.setText("")
 
@@ -475,12 +477,12 @@ class ImageWindow(QMainWindow):
             x, y = self._map_event_to_image(event)
             dx = x - self.last_pos[0]
             dy = y - self.last_pos[1]
-            
-            if self.drag_handle == 'center':
+
+            if self.drag_handle == "center":
                 self.dragging_roi.move((dx, dy))
             else:
                 self.dragging_roi.adjust(self.drag_handle, (x, y))
-                
+
             self.last_pos = (x, y)
             self.canvas.update()
             return
@@ -496,7 +498,7 @@ class ImageWindow(QMainWindow):
             self.dragging_roi = None
             self.drag_handle = None
             self.last_pos = None
-            
+
         if self.drawing_roi:
             self.drawing_roi = None
             self.start_pos = None
@@ -504,11 +506,12 @@ class ImageWindow(QMainWindow):
 
 from .roi_manager import get_roi_manager
 
+
 class Toolbar(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("impy v0.1 (prototype)")
-        self.setGeometry(100, 100, 600, 100) # Wider
+        self.setGeometry(100, 100, 600, 100)  # Wider
         self.setAcceptDrops(True)
         self.open_windows = []
 
@@ -516,52 +519,53 @@ class Toolbar(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
-        
+
         # Label
         self.label = QLabel("Drag & Drop Images")
         self.label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.label)
-        
+
         # Tool Bar (Actual QToolBar)
         self.tools = QToolBar("Tools")
         self.addToolBar(self.tools)
-        
+
         # Actions
         self.act_pointer = QAction("Pointer", self)
         self.act_pointer.setCheckable(True)
         self.act_pointer.setChecked(True)
         self.act_pointer.triggered.connect(lambda: self.set_tool("pointer"))
-        
+
         self.act_coord = QAction("Coordinate", self)
         self.act_coord.setCheckable(True)
         self.act_coord.triggered.connect(lambda: self.set_tool("coordinate"))
-        
+
         self.act_rect = QAction("Rectangle", self)
         self.act_rect.setCheckable(True)
         self.act_rect.triggered.connect(lambda: self.set_tool("rect"))
-        
+
         self.act_circle = QAction("Circle", self)
         self.act_circle.setCheckable(True)
         self.act_circle.triggered.connect(lambda: self.set_tool("circle"))
-        
+
         self.act_line = QAction("Line", self)
         self.act_line.setCheckable(True)
         self.act_line.triggered.connect(lambda: self.set_tool("line"))
-        
+
         self.tools.addAction(self.act_pointer)
         self.tools.addAction(self.act_coord)
         self.tools.addAction(self.act_rect)
         self.tools.addAction(self.act_circle)
         self.tools.addAction(self.act_line)
-        
+
         # ROI Manager Button
         self.tools.addSeparator()
         self.act_roi_mgr = QAction("ROI Manager", self)
         self.act_roi_mgr.triggered.connect(self.show_roi_manager)
         self.tools.addAction(self.act_roi_mgr)
-        
+
         # Group
         from qtpy.QtWidgets import QActionGroup
+
         group = QActionGroup(self)
         group.addAction(self.act_pointer)
         group.addAction(self.act_coord)
@@ -582,7 +586,7 @@ class Toolbar(QMainWindow):
 
     def set_tool(self, tool_name):
         manager.active_tool = tool_name
-        # Update cursor or state in all windows? 
+        # Update cursor or state in all windows?
         # For now, windows check state on click.
         # But we might want to update cursor immediately.
         # Let's iterate windows
@@ -604,7 +608,7 @@ class Toolbar(QMainWindow):
         files = [u.toLocalFile() for u in event.mimeData().urls()]
 
         # Collect supported image files
-        supported_ext = {'.ims', '.tif', '.tiff', '.png', '.jpg', '.jpeg'}
+        supported_ext = {".ims", ".tif", ".tiff", ".png", ".jpg", ".jpeg"}
         image_files = []
 
         for f in files:
@@ -623,6 +627,7 @@ class Toolbar(QMainWindow):
         if len(image_files) > 1:
             # Multiple files -> TiledViewer
             from .tiled_viewer import TiledViewer
+
             viewer = TiledViewer(image_files)
             viewer.show()
             self.open_windows.append(viewer)
@@ -640,7 +645,7 @@ class Toolbar(QMainWindow):
         windows = list(manager.get_all().values())
         for w in windows:
             w.close()
-            
+
         # Close ROI Manager
         try:
             mgr = get_roi_manager()
@@ -648,7 +653,7 @@ class Toolbar(QMainWindow):
                 mgr.close()
         except Exception:
             pass
-            
+
         super().closeEvent(event)
 
     def spawn_viewer(self, filepath):
@@ -663,28 +668,29 @@ class Toolbar(QMainWindow):
 def imshow(data, title="Image", dims=None):
     """
     Convenience function to show an image from a numpy array.
-    
+
     Args:
         data (np.ndarray): Image data.
         title (str): Window title.
-        dims (str): Dimension order string (e.g. 'tyx', 'zcyx'). 
+        dims (str): Dimension order string (e.g. 'tyx', 'zcyx').
                     If None, heuristics are used.
     """
     # Ensure QApplication exists
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
-        
+
     # Apply Theme
     from .theme import DARK_THEME
+
     app.setStyleSheet(DARK_THEME)
-    
+
     # Normalize data to 5D (T, Z, C, Y, X)
     data = normalize_to_5d(data, dims=dims)
-        
+
     viewer = ImageWindow(data, title=title)
     viewer.show()
-    
+
     # If running in interactive shell, we might not want to block?
     # But usually we need app.exec_() if not in IPython/Jupyter with event loop integration.
     # For now, just return the viewer.
@@ -699,5 +705,6 @@ def run_app():
     app = QApplication.instance()
     if app:
         from .theme import DARK_THEME
+
         app.setStyleSheet(DARK_THEME)
         app.exec_()
