@@ -420,6 +420,9 @@ class ImageWindow(QMainWindow):
         tool = manager.active_tool
         x, y = self._map_event_to_image(event)
 
+        # Ensure this window is active in ROI manager
+        get_roi_manager().set_active_window(self)
+
         if tool == "pointer":
             # Hit Test (Reverse order to select top-most)
             hit_roi = None
