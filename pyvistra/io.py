@@ -6,6 +6,43 @@ import tifffile
 from .imaris_reader import ImarisReader
 
 
+def is_rgb_image(arr):
+    """
+    Detect if an array is likely an RGB/RGBA image.
+
+    RGB images have shape (Y, X, 3) or (Y, X, 4) with the last dimension
+    being small (3 or 4 for RGB/RGBA).
+
+    Returns:
+        bool: True if array appears to be RGB/RGBA
+    """
+    if arr.ndim == 3 and arr.shape[-1] in (3, 4):
+        # Additional heuristic: Y and X should be larger than color channels
+        if arr.shape[0] > 4 and arr.shape[1] > 4:
+            return True
+    return False
+
+
+def load_standard_image(filepath):
+    """
+    Load standard image formats (PNG, JPEG, etc.) using matplotlib.
+
+    Returns:
+        tuple: (numpy array, is_rgb flag)
+    """
+    import matplotlib.image as mpimg
+
+    img = mpimg.imread(filepath)
+
+    # matplotlib returns floats [0,1] for PNG, uint8 for JPEG
+    # Normalize to consistent format
+    if img.dtype == np.float32 or img.dtype == np.float64:
+        # Convert to uint8 for consistency
+        img = (img * 255).astype(np.uint8)
+
+    return img, is_rgb_image(img)
+
+
 class Imaris5DProxy:
     """
     Wraps ImarisReader to behave like a 5D numpy array (Time, Z, Channel, Y, X).
@@ -171,14 +208,15 @@ class Numpy5DProxy:
         return self.array[key]
 
 
-def normalize_to_5d(data, dims=None):
+def normalize_to_5d(data, dims=None, rgb=None):
     """
     Normalizes a numpy array to (T, Z, C, Y, X) format.
 
     Args:
         data (np.ndarray): Input array.
-        dims (str): Optional dimension string (e.g. 'tyx', 'zcyx').
+        dims (str): Optional dimension string (e.g. 'tyx', 'zcyx', 'yxc' for RGB).
                     If None, heuristics are used.
+        rgb (bool): If True, treat as RGB image. If None, auto-detect.
 
     Returns:
         Numpy5DProxy: Wrapped data.
@@ -187,6 +225,10 @@ def normalize_to_5d(data, dims=None):
         raise ValueError("Input must be a numpy array")
 
     final_img = data
+
+    # Auto-detect RGB if not specified
+    if rgb is None:
+        rgb = is_rgb_image(data)
 
     if dims:
         dims = dims.lower()
@@ -218,8 +260,13 @@ def normalize_to_5d(data, dims=None):
         ndim = data.ndim
         if ndim == 2:  # (Y, X) -> (1, 1, 1, Y, X)
             final_img = data[np.newaxis, np.newaxis, np.newaxis, :, :]
-        elif ndim == 3:  # Assume (Z, Y, X) -> (1, Z, 1, Y, X)
-            final_img = data[np.newaxis, :, np.newaxis, :, :]
+        elif ndim == 3:
+            if rgb:
+                # RGB image: (Y, X, C) -> (1, 1, C, Y, X)
+                final_img = data.transpose(2, 0, 1)[np.newaxis, np.newaxis, :, :, :]
+            else:
+                # Z-stack: (Z, Y, X) -> (1, Z, 1, Y, X)
+                final_img = data[np.newaxis, :, np.newaxis, :, :]
         elif ndim == 4:  # Assume (Z, C, Y, X) -> (1, Z, C, Y, X)
             final_img = data[np.newaxis, :, :, :, :]
         elif ndim == 5:  # Assume (T, Z, C, Y, X)
@@ -232,6 +279,11 @@ def load_image(filepath, use_memmap=True):
     """
     Loads an image and normalizes it to (T, Z, C, Y, X).
     Returns: (image_data_proxy, metadata_dict)
+
+    Supported formats:
+        - .ims (Imaris)
+        - .tif, .tiff (TIFF)
+        - .png, .jpg, .jpeg (standard images via matplotlib)
     """
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"File not found: {filepath}")
@@ -248,17 +300,36 @@ def load_image(filepath, use_memmap=True):
             "shape": data.shape,
             "scale": reader.voxel_size,  # (Z, Y, X)
             "channels": reader.channels_info,
+            "is_rgb": False,
         }
         return data, meta
 
+    # --- STANDARD IMAGE PATH (PNG, JPEG) ---
+    if ext in (".png", ".jpg", ".jpeg"):
+        img, detected_rgb = load_standard_image(filepath)
+
+        # Normalize to 5D
+        final_img = normalize_to_5d(img, rgb=detected_rgb).array
+
+        data_proxy = Numpy5DProxy(final_img)
+
+        return data_proxy, {
+            "filename": os.path.basename(filepath),
+            "shape": final_img.shape,
+            "scale": (1.0, 1.0, 1.0),  # No physical scale for standard images
+            "is_rgb": detected_rgb,
+        }
+
     # --- TIFF PATH ---
-    # Use generic generic wrapper for consistency
     scale = (1.0, 1.0, 1.0)
 
     if use_memmap:
         img = tifffile.memmap(filepath)
     else:
         img = tifffile.imread(filepath)
+
+    # Detect RGB before any transformation
+    detected_rgb = is_rgb_image(img)
 
     # Extract Metadata
     try:
@@ -312,23 +383,8 @@ def load_image(filepath, use_memmap=True):
     except Exception as e:
         print(f"Warning: Could not read TIFF metadata: {e}")
 
-    ndim = img.ndim
-    final_img = img
-
-    # Normalization to (T, Z, C, Y, X)
-    if ndim == 2:  # (Y, X) -> (1, 1, 1, Y, X)
-        final_img = img[np.newaxis, np.newaxis, np.newaxis, :, :]
-    elif ndim == 3:  # Assume (Z, Y, X) -> (1, Z, 1, Y, X)
-        if img.shape[-1] == 3:
-            # most likely color image (Y, X, 3) -> (1, 1, 3, Y, X)
-            # transpose to (3, Y, X)
-            final_img = img.transpose(2, 0, 1)[np.newaxis, np.newaxis, :, :, :]
-        else:
-            final_img = img[np.newaxis, :, np.newaxis, :, :]
-    elif ndim == 4:  # Assume (Z, C, Y, X) -> (1, Z, C, Y, X)
-        final_img = img[np.newaxis, :, :, :, :]
-    elif ndim == 5:  # Assume (T, Z, C, Y, X)
-        final_img = img
+    # Use normalize_to_5d with RGB detection
+    final_img = normalize_to_5d(img, rgb=detected_rgb).array
 
     # Wrap in Proxy
     data_proxy = Numpy5DProxy(final_img)
@@ -337,6 +393,7 @@ def load_image(filepath, use_memmap=True):
         "filename": os.path.basename(filepath),
         "shape": final_img.shape,
         "scale": scale,
+        "is_rgb": detected_rgb,
     }
 
 

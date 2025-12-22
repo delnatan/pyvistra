@@ -98,7 +98,8 @@ class ImageWindow(QMainWindow):
         self.layout.addWidget(self.info_label, 0)
 
         # 5. Visuals
-        self.renderer = CompositeImageVisual(self.view, self.img_data)
+        is_rgb = self.meta.get("is_rgb", False)
+        self.renderer = CompositeImageVisual(self.view, self.img_data, is_rgb=is_rgb)
         self.renderer.reset_camera(self.img_data.shape)
 
         # 6. Controls Area (Sliders + Mode)
