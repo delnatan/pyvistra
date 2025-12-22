@@ -160,6 +160,15 @@ class ImageWindow(QMainWindow):
                     roi.flip()
                     self.canvas.update()
                     break
+        elif event.key() == Qt.Key_L:
+            # Toggle ROI labels visibility
+            from .rois import ROI
+            show = ROI.toggle_labels()
+            # Update visibility for all ROIs in all windows
+            for w in manager.get_all().values():
+                for roi in w.rois:
+                    roi.label_visual.visible = show
+                w.canvas.update()
         elif event.key() == Qt.Key_Escape:
             # Deselect all ROIs
             for roi in self.rois:
@@ -490,7 +499,21 @@ class ImageWindow(QMainWindow):
         # 3. Update Drawing
         if self.drawing_roi and event.button == 1:
             x, y = self._map_event_to_image(event)
-            self.drawing_roi.update(self.start_pos, (x, y))
+            end_pos = (x, y)
+
+            # Shift key constrains LineROI to horizontal/vertical
+            if isinstance(self.drawing_roi, LineROI) and 'Shift' in event.modifiers:
+                sx, sy = self.start_pos
+                dx = abs(x - sx)
+                dy = abs(y - sy)
+                if dx > dy:
+                    # Horizontal line
+                    end_pos = (x, sy)
+                else:
+                    # Vertical line
+                    end_pos = (sx, y)
+
+            self.drawing_roi.update(self.start_pos, end_pos)
             self.canvas.update()
 
     def on_mouse_release(self, event):
