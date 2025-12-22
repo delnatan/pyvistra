@@ -1,12 +1,24 @@
+"""pyvistra - a light-weight image visualization tool
+
+Based on vispy and PyQt (via qtpy)
+
+"""
+
 __version__ = "0.1.2"
 
-from .io import Imaris5DProxy, Numpy5DProxy, load_image, normalize_to_5d, save_tiff
-from .ui import ImageWindow, Toolbar, imshow, run_app
-from .rois import CircleROI, CoordinateROI, LineROI, RectangleROI, ROI
-from .roi_manager import ROIManager, get_roi_manager
+from .imaris_reader import ImarisReader
+from .io import (
+    Imaris5DProxy,
+    Numpy5DProxy,
+    load_image,
+    normalize_to_5d,
+    save_tiff,
+)
 from .manager import WindowManager, manager
 from .ortho import OrthoViewer
-from .imaris_reader import ImarisReader
+from .roi_manager import ROIManager, get_roi_manager
+from .rois import ROI, CircleROI, CoordinateROI, LineROI, RectangleROI
+from .ui import ImageWindow, Toolbar, imshow, run_app
 
 __all__ = [
     "__version__",

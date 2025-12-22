@@ -1,4 +1,4 @@
-# impy
+# pyvistra
 
 Image analysis and ROI management tool.
 
@@ -23,21 +23,21 @@ uv pip install -e .
 Run the application:
 
 ```bash
-impy
+pyvistra
 # or
-python -m impy
+python -m pyvistra
 ```
 
 ## Library Usage
 
-You can use `impy` as a library to read and process images programmatically.
+You can use `pyvistra` as a library to read and process images programmatically.
 
 ### Reading Imaris Files
 
 You can use the `ImarisReader` class to read `.ims` files directly:
 
 ```python
-from impy.imaris_reader import ImarisReader
+from pyvistra.imaris_reader import ImarisReader
 
 # Open the file
 reader = ImarisReader('path/to/file.ims')
@@ -61,7 +61,7 @@ To easily load a 3D timelapse, you can use the `load_image` function. The return
 
 ```python
 import numpy as np
-from impy.io import load_image
+from pyvistra.io import load_image
 
 # Load image using the high-level loader
 # Returns a proxy object that behaves like a numpy array
@@ -87,7 +87,7 @@ print(f"Volume shape: {volume.shape}") # (Z, Y, X)
 You can save 5D arrays (or crops) to TIFF format using `save_tiff`. This preserves voxel size and dimension order metadata compatible with ImageJ.
 
 ```python
-from impy.io import save_tiff
+from pyvistra.io import save_tiff
 
 # Save the volume we just read
 # meta['scale'] contains the voxel size (z, y, x)
@@ -96,7 +96,7 @@ save_tiff("output.tif", volume, scale=meta['scale'])
 
 ### Interactive IPython Usage
 
-`impy` can be used interactively in IPython or Jupyter notebooks. First, enable Qt event loop integration:
+`pyvistra` can be used interactively in IPython or Jupyter notebooks. First, enable Qt event loop integration:
 
 ```python
 # In IPython, enable Qt event loop integration
@@ -104,7 +104,7 @@ save_tiff("output.tif", volume, scale=meta['scale'])
 
 # Now you can use imshow() interactively
 import numpy as np
-from impy.ui import imshow
+from pyvistra.ui import imshow
 
 # Create some test data
 data = np.random.rand(20, 256, 256)  # (Z, Y, X)
@@ -117,7 +117,7 @@ viewer = imshow(data, title="Random Data", dims="zyx")
 print(viewer.img_data.shape)  # (1, 20, 1, 256, 256) - normalized to 5D
 
 # Load and display a file
-from impy.io import load_image
+from pyvistra.io import load_image
 data, meta = load_image('path/to/file.ims')
 viewer2 = imshow(data[0, :, 0], title="Channel 0", dims="zyx")
 ```
@@ -125,7 +125,7 @@ viewer2 = imshow(data[0, :, 0], title="Channel 0", dims="zyx")
 If you're running from a regular Python script (not IPython), you need to start the Qt event loop manually:
 
 ```python
-from impy.ui import imshow, run_app
+from pyvistra.ui import imshow, run_app
 import numpy as np
 
 data = np.random.rand(10, 100, 100)

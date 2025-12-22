@@ -2,7 +2,7 @@ import sys
 
 from qtpy.QtWidgets import QApplication
 
-from impy.ui import Toolbar
+from pyvistra.ui import Toolbar
 
 
 def main():
@@ -10,7 +10,7 @@ def main():
     qt_app = QApplication(sys.argv)
 
     # Apply global stylesheet
-    from impy.theme import DARK_THEME
+    from pyvistra.theme import DARK_THEME
     qt_app.setStyleSheet(DARK_THEME)
 
     # Create the floating toolbar

@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "impy"
+name = "pyvistra"
 version = "0.1.2"
 description = "Image analysis and ROI management tool"
 readme = "README.md"
@@ -26,11 +26,8 @@ dependencies = [
 ]
 
 [project.scripts]
-impy = "impy.__main__:main"
+pyvistra = "pyvistra.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["impy*"]
-
-[tool.setuptools.package-data]
-impy = ["py.typed"]
+include = ["pyvistra*"]

@@ -510,7 +510,7 @@ from .roi_manager import get_roi_manager
 class Toolbar(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("impy v0.1 (prototype)")
+        self.setWindowTitle("pyvistra v0.1 (prototype)")
         self.setGeometry(100, 100, 600, 100)  # Wider
         self.setAcceptDrops(True)
         self.open_windows = []

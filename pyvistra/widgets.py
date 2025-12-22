@@ -14,7 +14,7 @@ from qtpy.QtWidgets import (
     QDoubleSpinBox,
     QGroupBox,
 )
-from impy.visuals import COLORMAPS
+from pyvistra.visuals import COLORMAPS
 
 # Theme Constants
 WIDGET_BG = QColor(32, 32, 32)
