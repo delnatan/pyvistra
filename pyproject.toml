@@ -31,3 +31,6 @@ impy = "impy.__main__:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["impy*"]
+
+[tool.setuptools.package-data]
+impy = ["py.typed"]
