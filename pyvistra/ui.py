@@ -3,7 +3,7 @@ import sys
 
 import numpy as np
 from qtpy import API_NAME
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, Signal
 from qtpy.QtGui import QDragEnterEvent, QDropEvent
 from qtpy.QtWidgets import (
     QAction,
@@ -37,6 +37,16 @@ except Exception:
 
 
 class ImageWindow(QMainWindow):
+    """Main image viewer window with ROI support."""
+
+    # Signals for decoupled communication
+    window_activated = Signal(object)    # Emits self when window becomes active
+    window_shown = Signal(object)        # Emits self when window is shown
+    window_closing = Signal(object)      # Emits self when window is closing
+    roi_added = Signal(object)           # Emits the ROI that was added
+    roi_removed = Signal(object)         # Emits the ROI that was removed
+    roi_selection_changed = Signal(object)  # Emits the selected ROI (or None)
+
     def __init__(self, data_or_path, title="Image"):
         super().__init__()
         self.setAttribute(Qt.WA_DeleteOnClose)
@@ -143,17 +153,15 @@ class ImageWindow(QMainWindow):
 
     def showEvent(self, event):
         super().showEvent(event)
-        # Notify ROI manager that a new window is available
-        if roi_manager_exists():
-            get_roi_manager().refresh_windows()
+        self.window_shown.emit(self)
 
     def closeEvent(self, event):
         manager.unregister(self)
-        get_roi_manager().remove_window(self)
+        self.window_closing.emit(self)
         super().closeEvent(event)
 
     def focusInEvent(self, event):
-        get_roi_manager().set_active_window(self)
+        self.window_activated.emit(self)
         super().focusInEvent(event)
 
     def keyPressEvent(self, event):
@@ -181,8 +189,7 @@ class ImageWindow(QMainWindow):
             for roi in self.rois:
                 roi.select(False)
             self.canvas.update()
-            # Notify Manager (optional, but good for sync)
-            get_roi_manager().select_roi(None)
+            self.roi_selection_changed.emit(None)
         else:
             super().keyPressEvent(event)
 
@@ -420,8 +427,8 @@ class ImageWindow(QMainWindow):
         tool = manager.active_tool
         x, y = self._map_event_to_image(event)
 
-        # Ensure this window is active in ROI manager
-        get_roi_manager().set_active_window(self)
+        # Notify that this window is now active
+        self.window_activated.emit(self)
 
         if tool == "pointer":
             # Hit Test (Reverse order to select top-most)
@@ -439,8 +446,8 @@ class ImageWindow(QMainWindow):
             for roi in self.rois:
                 roi.select(roi is hit_roi)
 
-            # Notify Manager
-            get_roi_manager().select_roi(hit_roi)
+            # Notify about selection change
+            self.roi_selection_changed.emit(hit_roi)
 
             if hit_roi:
                 self.dragging_roi = hit_roi
@@ -464,7 +471,7 @@ class ImageWindow(QMainWindow):
 
         if self.drawing_roi:
             self.rois.append(self.drawing_roi)
-            get_roi_manager().add_roi(self.drawing_roi)
+            self.roi_added.emit(self.drawing_roi)
             # Initial update (zero size/length)
             self.drawing_roi.update((x, y), (x, y))
             self.canvas.update()

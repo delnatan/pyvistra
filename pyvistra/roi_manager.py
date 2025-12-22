@@ -1,6 +1,6 @@
 import json
 from qtpy.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QPushButton, 
+    QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QPushButton,
     QLabel, QFileDialog, QListWidgetItem, QComboBox, QMenuBar, QAction,
     QSizePolicy
 )
@@ -9,13 +9,27 @@ from .manager import manager
 from .rois import CoordinateROI, RectangleROI, CircleROI, LineROI
 from .analysis import plot_profile, crop_image, measure_intensity
 
+
 class ROIManager(QWidget):
+    """
+    Manages ROIs across multiple ImageWindows.
+
+    Connects to ImageWindow signals for decoupled communication:
+    - window_shown: Add window to dropdown
+    - window_closing: Remove window from dropdown
+    - window_activated: Set as active window
+    - roi_added: Refresh ROI list
+    - roi_removed: Refresh ROI list
+    - roi_selection_changed: Sync list selection
+    """
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("ROI Manager")
         self.resize(300, 400)
         self.active_window = None
-        
+        self._connected_windows = set()  # Track windows we've connected to
+
         self.layout = QVBoxLayout(self)
         
         # Window Selection
@@ -79,22 +93,85 @@ class ROIManager(QWidget):
             self.window_combo.setCurrentIndex(0)
 
     def refresh_windows(self):
-        """Populate the window combo box."""
+        """Populate the window combo box and connect to new windows."""
         self.window_combo.blockSignals(True)
         self.window_combo.clear()
-        
+
         windows = manager.get_all()
         for wid, win in windows.items():
             title = win.windowTitle()
             self.window_combo.addItem(title, userData=wid)
-            
+            # Connect to window signals if not already connected
+            self._connect_window(win)
+
         # Select active if present
         if self.active_window:
             idx = self.window_combo.findData(self.active_window.window_id)
             if idx >= 0:
                 self.window_combo.setCurrentIndex(idx)
-                
+
         self.window_combo.blockSignals(False)
+
+    # ---- Signal Connection Methods ----
+
+    def _connect_window(self, window):
+        """Connect to an ImageWindow's signals."""
+        if window in self._connected_windows:
+            return  # Already connected
+
+        window.window_shown.connect(self._on_window_shown)
+        window.window_closing.connect(self._on_window_closing)
+        window.window_activated.connect(self._on_window_activated)
+        window.roi_added.connect(self._on_roi_added)
+        window.roi_removed.connect(self._on_roi_removed)
+        window.roi_selection_changed.connect(self._on_roi_selection_changed)
+
+        self._connected_windows.add(window)
+
+    def _disconnect_window(self, window):
+        """Disconnect from an ImageWindow's signals."""
+        if window not in self._connected_windows:
+            return
+
+        try:
+            window.window_shown.disconnect(self._on_window_shown)
+            window.window_closing.disconnect(self._on_window_closing)
+            window.window_activated.disconnect(self._on_window_activated)
+            window.roi_added.disconnect(self._on_roi_added)
+            window.roi_removed.disconnect(self._on_roi_removed)
+            window.roi_selection_changed.disconnect(self._on_roi_selection_changed)
+        except (TypeError, RuntimeError):
+            # Signal might already be disconnected
+            pass
+
+        self._connected_windows.discard(window)
+
+    # ---- Signal Handlers ----
+
+    def _on_window_shown(self, window):
+        """Handle window_shown signal."""
+        self.refresh_windows()
+
+    def _on_window_closing(self, window):
+        """Handle window_closing signal."""
+        self._disconnect_window(window)
+        self.remove_window(window)
+
+    def _on_window_activated(self, window):
+        """Handle window_activated signal."""
+        self.set_active_window(window)
+
+    def _on_roi_added(self, roi):
+        """Handle roi_added signal."""
+        self.refresh_list()
+
+    def _on_roi_removed(self, roi):
+        """Handle roi_removed signal."""
+        self.refresh_list()
+
+    def _on_roi_selection_changed(self, roi):
+        """Handle roi_selection_changed signal."""
+        self.select_roi(roi)
 
     def on_window_combo_changed(self, index):
         if index < 0:
