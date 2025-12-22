@@ -25,7 +25,7 @@ from vispy import app, scene
 from .io import Numpy5DProxy, load_image, normalize_to_5d
 from .manager import manager
 from .ortho import OrthoViewer
-from .roi_manager import get_roi_manager
+from .roi_manager import get_roi_manager, roi_manager_exists
 from .rois import CircleROI, CoordinateROI, LineROI, RectangleROI
 from .visuals import CompositeImageVisual
 from .widgets import ChannelPanel, ContrastDialog, MetadataDialog
@@ -504,9 +504,6 @@ class ImageWindow(QMainWindow):
             self.start_pos = None
 
 
-from .roi_manager import get_roi_manager
-
-
 class Toolbar(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -646,13 +643,15 @@ class Toolbar(QMainWindow):
         for w in windows:
             w.close()
 
-        # Close ROI Manager
-        try:
-            mgr = get_roi_manager()
-            if mgr.isVisible():
-                mgr.close()
-        except Exception:
-            pass
+        # Close ROI Manager only if it was already created
+        # Avoids creating a widget during shutdown which causes segfault
+        if roi_manager_exists():
+            try:
+                mgr = get_roi_manager()
+                if mgr.isVisible():
+                    mgr.close()
+            except Exception:
+                pass
 
         super().closeEvent(event)
 

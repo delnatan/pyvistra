@@ -313,3 +313,8 @@ def get_roi_manager():
     return _roi_manager_instance
 
 
+def roi_manager_exists():
+    """Check if ROI manager singleton has been created without creating it."""
+    return _roi_manager_instance is not None
+
+
