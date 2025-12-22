@@ -141,6 +141,12 @@ class ImageWindow(QMainWindow):
         # Initial Draw
         self.update_view()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Notify ROI manager that a new window is available
+        if roi_manager_exists():
+            get_roi_manager().refresh_windows()
+
     def closeEvent(self, event):
         manager.unregister(self)
         get_roi_manager().remove_window(self)

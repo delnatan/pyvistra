@@ -70,6 +70,14 @@ class ROIManager(QWidget):
         action_measure.triggered.connect(lambda: self.run_analysis(measure_intensity))
         analysis_menu.addAction(action_measure)
 
+    def showEvent(self, event):
+        """Refresh window list when ROI manager is shown."""
+        super().showEvent(event)
+        self.refresh_windows()
+        # Auto-select current window if none active
+        if not self.active_window and self.window_combo.count() > 0:
+            self.window_combo.setCurrentIndex(0)
+
     def refresh_windows(self):
         """Populate the window combo box."""
         self.window_combo.blockSignals(True)
