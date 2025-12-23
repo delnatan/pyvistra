@@ -462,14 +462,17 @@ class ImageWindow(QMainWindow):
 
         self.start_pos = (x, y)
 
+        # Assign index based on current ROI count (0-indexed to match ROI manager)
+        roi_index = str(len(self.rois))
+
         if tool == "coordinate":
-            self.drawing_roi = CoordinateROI(self.view)
+            self.drawing_roi = CoordinateROI(self.view, name=roi_index)
         elif tool == "rect":
-            self.drawing_roi = RectangleROI(self.view)
+            self.drawing_roi = RectangleROI(self.view, name=roi_index)
         elif tool == "circle":
-            self.drawing_roi = CircleROI(self.view)
+            self.drawing_roi = CircleROI(self.view, name=roi_index)
         elif tool == "line":
-            self.drawing_roi = LineROI(self.view)
+            self.drawing_roi = LineROI(self.view, name=roi_index)
 
         if self.drawing_roi:
             self.rois.append(self.drawing_roi)
