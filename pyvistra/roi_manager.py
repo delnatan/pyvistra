@@ -169,6 +169,9 @@ class ROIManager(QWidget):
 
         windows = manager.get_all()
         for wid, win in windows.items():
+            # Only show ROI-capable windows (skip OrthoViewer, etc.)
+            if not hasattr(win, 'roi_added'):
+                continue
             title = win.windowTitle()
             self.window_combo.addItem(title, userData=wid)
             # Connect to window signals if not already connected
@@ -185,9 +188,16 @@ class ROIManager(QWidget):
     # ---- Signal Connection Methods ----
 
     def _connect_window(self, window):
-        """Connect to an ImageWindow's signals."""
+        """Connect to an ImageWindow's signals.
+
+        Skips windows that don't have the required signals (e.g., OrthoViewer).
+        """
         if window in self._connected_windows:
             return  # Already connected
+
+        # Duck typing: only connect to windows that have ROI-related signals
+        if not hasattr(window, 'roi_added'):
+            return  # Not an ROI-capable window (e.g., OrthoViewer)
 
         window.window_shown.connect(self._on_window_shown)
         window.window_closing.connect(self._on_window_closing)
