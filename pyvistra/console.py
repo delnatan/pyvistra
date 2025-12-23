@@ -12,13 +12,19 @@ import traceback
 from io import StringIO
 
 from qtpy.QtCore import Qt, Signal
-from qtpy.QtGui import QFont, QFontDatabase, QFontMetrics, QTextCursor, QKeyEvent
+from qtpy.QtGui import (
+    QFont,
+    QFontDatabase,
+    QFontMetrics,
+    QKeyEvent,
+    QTextCursor,
+)
 from qtpy.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
+    QLabel,
     QPlainTextEdit,
     QSplitter,
-    QLabel,
+    QVBoxLayout,
+    QWidget,
 )
 
 
@@ -58,7 +64,9 @@ class ConsoleInput(QPlainTextEdit):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setPlaceholderText(">>> Enter Python code (Shift+Enter for newline, Enter to execute)")
+        self.setPlaceholderText(
+            ">>> Enter Python code (Shift+Enter for newline, Enter to execute)"
+        )
         self._setup_font()
 
     def _setup_font(self):
@@ -69,7 +77,7 @@ class ConsoleInput(QPlainTextEdit):
 
         # Set tab width to 4 spaces
         metrics = QFontMetrics(font)
-        tab_width = metrics.horizontalAdvance(' ') * 4
+        tab_width = metrics.horizontalAdvance(" ") * 4
         self.setTabStopDistance(tab_width)
 
     def keyPressEvent(self, event: QKeyEvent):
@@ -109,7 +117,7 @@ class ConsoleOutput(QPlainTextEdit):
 
         # Set tab width to 4 spaces
         metrics = QFontMetrics(font)
-        tab_width = metrics.horizontalAdvance(' ') * 4
+        tab_width = metrics.horizontalAdvance(" ") * 4
         self.setTabStopDistance(tab_width)
 
     def _setup_style(self):
@@ -128,7 +136,7 @@ class ConsoleOutput(QPlainTextEdit):
 
         if color:
             # Insert colored text using HTML (escape special chars like < > &)
-            escaped = html.escape(text)
+            escaped = html.escape(text).replace("\n", "<br>")
             html_str = f'<span style="color: {color};">{escaped}</span>'
             cursor.insertHtml(html_str)
             cursor.insertText("\n")
@@ -140,7 +148,7 @@ class ConsoleOutput(QPlainTextEdit):
 
     def append_input(self, code):
         """Append input code with prompt styling."""
-        lines = code.split('\n')
+        lines = code.split("\n")
         for i, line in enumerate(lines):
             prefix = ">>> " if i == 0 else "... "
             self.append_text(prefix + line, "#569cd6")
@@ -201,7 +209,9 @@ class PythonConsole(QWidget):
         layout.setSpacing(5)
 
         # Header
-        header = QLabel("Python Console - Access pyvistra objects interactively")
+        header = QLabel(
+            "Python Console - Access pyvistra objects interactively"
+        )
         header.setStyleSheet("color: #888; font-size: 11px;")
         layout.addWidget(header)
 
@@ -233,17 +243,18 @@ class PythonConsole(QWidget):
 
         # Build namespace with useful objects
         self.namespace = {
-            '__name__': '__console__',
-            '__doc__': None,
-            'np': np,
-            'numpy': np,
+            "__name__": "__console__",
+            "__doc__": None,
+            "np": np,
+            "numpy": np,
         }
 
         # Add matplotlib if available
         try:
             import matplotlib.pyplot as plt
-            self.namespace['plt'] = plt
-            self.namespace['matplotlib'] = __import__('matplotlib')
+
+            self.namespace["plt"] = plt
+            self.namespace["matplotlib"] = __import__("matplotlib")
         except ImportError:
             pass
 
@@ -258,15 +269,17 @@ class PythonConsole(QWidget):
         from .manager import manager
         from .roi_manager import get_roi_manager, roi_manager_exists
 
-        self.namespace['manager'] = manager
-        self.namespace['windows'] = manager.get_all()
+        self.namespace["manager"] = manager
+        self.namespace["windows"] = manager.get_all()
 
         # Only add roi_mgr if it exists (avoid creating during startup)
         if roi_manager_exists():
-            self.namespace['roi_mgr'] = get_roi_manager()
+            self.namespace["roi_mgr"] = get_roi_manager()
         else:
             # Lazy accessor
-            self.namespace['roi_mgr'] = property(lambda self: get_roi_manager())
+            self.namespace["roi_mgr"] = property(
+                lambda self: get_roi_manager()
+            )
 
         # Add helper function to get current/active window
         def get_active_window():
@@ -280,17 +293,19 @@ class PythonConsole(QWidget):
                 return list(windows.values())[0]
             return None
 
-        self.namespace['active_window'] = get_active_window
-        self.namespace['aw'] = get_active_window  # Short alias
+        self.namespace["active_window"] = get_active_window
+        self.namespace["aw"] = get_active_window  # Short alias
 
         # Add imshow for convenience
         from .ui import imshow
-        self.namespace['imshow'] = imshow
+
+        self.namespace["imshow"] = imshow
 
         # Add io functions
         from .io import load_image, save_tiff
-        self.namespace['load_image'] = load_image
-        self.namespace['save_tiff'] = save_tiff
+
+        self.namespace["load_image"] = load_image
+        self.namespace["save_tiff"] = save_tiff
 
     def _print_welcome(self):
         """Print welcome message with available objects."""
@@ -336,13 +351,13 @@ Example:
             try:
                 # Try to compile as expression first (for result display)
                 try:
-                    compiled = compile(code_str, '<console>', 'eval')
+                    compiled = compile(code_str, "<console>", "eval")
                     result = eval(compiled, self.namespace)
                     if result is not None:
                         self.output.append_result(repr(result))
                 except SyntaxError:
                     # Not an expression, execute as statements
-                    compiled = compile(code_str, '<console>', 'exec')
+                    compiled = compile(code_str, "<console>", "exec")
                     exec(compiled, self.namespace)
             except Exception:
                 # Show traceback
