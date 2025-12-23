@@ -35,6 +35,9 @@ class ROI:
         self.label_visual.visible = ROI.show_labels
         self.visuals.append(self.label_visual)
 
+    def __repr__(self):
+        return f"<{self.__class__.__name__} name='{self.name}'>"
+
     def set_visible(self, visible):
         for v in self.visuals:
             # Don't show handles if not selected, even if ROI is visible
