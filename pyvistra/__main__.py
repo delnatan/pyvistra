@@ -2,15 +2,16 @@ import sys
 
 from qtpy.QtWidgets import QApplication
 
-from pyvistra.ui import Toolbar
-
 
 def main():
-    # Create the Qt Application (agnostic backend)
+    # Create the Qt Application FIRST (before importing any modules that create QObjects)
     qt_app = QApplication(sys.argv)
 
-    # Apply global stylesheet
+    # Now it's safe to import modules that create QObjects at module level
+    from pyvistra.ui import Toolbar
     from pyvistra.theme import DARK_THEME
+
+    # Apply global stylesheet
     qt_app.setStyleSheet(DARK_THEME)
 
     # Create the floating toolbar

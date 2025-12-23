@@ -725,29 +725,34 @@ class Toolbar(QMainWindow):
             self.spawn_viewer(fname)
 
     def closeEvent(self, event):
-        # Close all managed windows
+        # Signal ROI Manager to stop processing updates BEFORE closing windows
+        # This prevents UI updates during the shutdown sequence
+        if roi_manager_exists():
+            try:
+                mgr = get_roi_manager()
+                mgr.cleanup()  # Disconnects signals, sets shutdown flag
+            except Exception:
+                pass
+
+        # Signal Console to stop processing updates
+        if console_exists():
+            try:
+                console = get_console()
+                if hasattr(console, 'cleanup'):
+                    console.cleanup()
+            except Exception:
+                pass
+
+        # Now close all managed windows - their signals won't trigger ROI Manager updates
         windows = list(manager.get_all().values())
         for w in windows:
             w.close()
 
-        # Close ROI Manager only if it was already created
-        # Avoids creating a widget during shutdown which causes segfault
-        if roi_manager_exists():
-            try:
-                mgr = get_roi_manager()
-                if mgr.isVisible():
-                    mgr.close()
-            except Exception:
-                pass
-
-        # Close Python Console if it was created
-        if console_exists():
-            try:
-                console = get_console()
-                if console.isVisible():
-                    console.close()
-            except Exception:
-                pass
+        # Quit Vispy's app to ensure clean OpenGL context shutdown
+        try:
+            app.quit()
+        except Exception:
+            pass
 
         super().closeEvent(event)
 
