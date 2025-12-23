@@ -453,6 +453,8 @@ class ImageWindow(QMainWindow):
                 self.dragging_roi = hit_roi
                 self.drag_handle = hit_handle
                 self.last_pos = (x, y)
+                # Disable camera panning while dragging ROI
+                self.view.camera.interactive = False
                 self.canvas.update()
             else:
                 self.canvas.update()
@@ -538,6 +540,9 @@ class ImageWindow(QMainWindow):
             self.dragging_roi = None
             self.drag_handle = None
             self.last_pos = None
+            # Re-enable camera panning if in pointer mode
+            if manager.active_tool == "pointer":
+                self.view.camera.interactive = True
 
         if self.drawing_roi:
             self.drawing_roi = None
