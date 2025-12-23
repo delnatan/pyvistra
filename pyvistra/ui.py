@@ -27,6 +27,7 @@ from .io import Numpy5DProxy, load_image, normalize_to_5d
 from .manager import manager
 from .ortho import OrthoViewer
 from .roi_manager import get_roi_manager, roi_manager_exists
+from .console import get_console, console_exists
 from .rois import CircleROI, CoordinateROI, LineROI, RectangleROI
 from .visuals import CompositeImageVisual
 from .widgets import ChannelPanel, ContrastDialog, MetadataDialog
@@ -636,6 +637,11 @@ class Toolbar(QMainWindow):
         self.act_roi_mgr.triggered.connect(self.show_roi_manager)
         self.tools.addAction(self.act_roi_mgr)
 
+        # Python Console Button
+        self.act_console = QAction("Console", self)
+        self.act_console.triggered.connect(self.show_console)
+        self.tools.addAction(self.act_console)
+
         # Group
         from qtpy.QtWidgets import QActionGroup
 
@@ -670,6 +676,11 @@ class Toolbar(QMainWindow):
         mgr = get_roi_manager()
         mgr.show()
         mgr.raise_()
+
+    def show_console(self):
+        console = get_console()
+        console.show()
+        console.raise_()
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
@@ -726,6 +737,15 @@ class Toolbar(QMainWindow):
                 mgr = get_roi_manager()
                 if mgr.isVisible():
                     mgr.close()
+            except Exception:
+                pass
+
+        # Close Python Console if it was created
+        if console_exists():
+            try:
+                console = get_console()
+                if console.isVisible():
+                    console.close()
             except Exception:
                 pass
 
