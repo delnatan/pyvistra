@@ -96,6 +96,27 @@ class ROIManager(QWidget):
         action_align.triggered.connect(self.align_lanes_action)
         lanes_menu.addAction(action_align)
 
+        # Connect to WindowManager signals for immediate window tracking
+        # This ensures we connect to new windows even when ROI Manager is hidden
+        manager.window_registered.connect(self._on_manager_window_registered)
+
+        # Connect to any windows that already exist
+        for window in manager.get_all().values():
+            self._connect_window(window)
+
+    def _on_manager_window_registered(self, window):
+        """Handle WindowManager.window_registered signal.
+
+        Immediately connect to the new window's signals so we receive
+        ROI events even if the ROI Manager is hidden.
+        """
+        if self._is_shutting_down:
+            return
+        self._connect_window(window)
+        # Update combo box if visible
+        if self.isVisible():
+            self.refresh_windows()
+
     def showEvent(self, event):
         """Refresh window list when ROI manager is shown."""
         super().showEvent(event)
@@ -126,6 +147,12 @@ class ROIManager(QWidget):
         destruction. Call this before quitting the application.
         """
         self._is_shutting_down = True
+
+        # Disconnect from WindowManager
+        try:
+            manager.window_registered.disconnect(self._on_manager_window_registered)
+        except (TypeError, RuntimeError):
+            pass
 
         # Disconnect from all windows to prevent signal callbacks
         for window in list(self._connected_windows):
