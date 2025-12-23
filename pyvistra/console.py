@@ -6,6 +6,7 @@ similar to napari's built-in console.
 """
 
 import code
+import html
 import sys
 import traceback
 from io import StringIO
@@ -126,9 +127,10 @@ class ConsoleOutput(QPlainTextEdit):
         cursor.movePosition(QTextCursor.End)
 
         if color:
-            # Insert colored text using HTML
-            html = f'<span style="color: {color};">{text}</span>'
-            cursor.insertHtml(html)
+            # Insert colored text using HTML (escape special chars like < > &)
+            escaped = html.escape(text)
+            html_str = f'<span style="color: {color};">{escaped}</span>'
+            cursor.insertHtml(html_str)
             cursor.insertText("\n")
         else:
             cursor.insertText(text + "\n")
