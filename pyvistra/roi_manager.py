@@ -14,6 +14,10 @@ class ROIManager(QWidget):
     """
     Manages ROIs across multiple ImageWindows.
 
+    This widget uses a hide/show pattern rather than create/destroy.
+    Once instantiated, it persists for the lifetime of the application.
+    Calling close() will hide the widget rather than destroying it.
+
     Connects to ImageWindow signals for decoupled communication:
     - window_shown: Add window to dropdown
     - window_closing: Remove window from dropdown
@@ -29,6 +33,7 @@ class ROIManager(QWidget):
         self.resize(300, 400)
         self.active_window = None
         self._connected_windows = set()  # Track windows we've connected to
+        self._is_shutting_down = False  # Flag to prevent UI updates during shutdown
 
         self.layout = QVBoxLayout(self)
         
@@ -99,6 +104,37 @@ class ROIManager(QWidget):
         if not self.active_window and self.window_combo.count() > 0:
             self.window_combo.setCurrentIndex(0)
 
+    def closeEvent(self, event):
+        """Override close to hide instead of destroy.
+
+        This implements the hide/show pattern for singleton widgets.
+        The widget remains alive but hidden, avoiding issues with
+        event handling during widget destruction.
+        """
+        if self._is_shutting_down:
+            # During app shutdown, allow actual close
+            super().closeEvent(event)
+        else:
+            # Normal close request: hide instead
+            event.ignore()
+            self.hide()
+
+    def cleanup(self):
+        """Prepare for application shutdown.
+
+        Disconnects all window signals to prevent callbacks during
+        destruction. Call this before quitting the application.
+        """
+        self._is_shutting_down = True
+
+        # Disconnect from all windows to prevent signal callbacks
+        for window in list(self._connected_windows):
+            self._disconnect_window(window)
+
+        self.active_window = None
+        self.roi_list.clear()
+        self.window_combo.clear()
+
     def refresh_windows(self):
         """Populate the window combo box and connect to new windows."""
         self.window_combo.blockSignals(True)
@@ -157,27 +193,39 @@ class ROIManager(QWidget):
 
     def _on_window_shown(self, window):
         """Handle window_shown signal."""
+        if self._is_shutting_down:
+            return
         self.refresh_windows()
 
     def _on_window_closing(self, window):
         """Handle window_closing signal."""
         self._disconnect_window(window)
+        if self._is_shutting_down:
+            return
         self.remove_window(window)
 
     def _on_window_activated(self, window):
         """Handle window_activated signal."""
+        if self._is_shutting_down:
+            return
         self.set_active_window(window)
 
     def _on_roi_added(self, roi):
         """Handle roi_added signal."""
+        if self._is_shutting_down:
+            return
         self.refresh_list()
 
     def _on_roi_removed(self, roi):
         """Handle roi_removed signal."""
+        if self._is_shutting_down:
+            return
         self.refresh_list()
 
     def _on_roi_selection_changed(self, roi):
         """Handle roi_selection_changed signal."""
+        if self._is_shutting_down:
+            return
         self.select_roi(roi)
 
     def on_window_combo_changed(self, index):

@@ -173,6 +173,10 @@ class PythonConsole(QWidget):
     """
     Interactive Python console widget for pyvistra.
 
+    This widget uses a hide/show pattern rather than create/destroy.
+    Once instantiated, it persists for the lifetime of the application.
+    Calling close() will hide the widget rather than destroying it.
+
     Provides a REPL with access to application state including:
     - manager: WindowManager singleton
     - roi_mgr: ROIManager singleton
@@ -189,6 +193,7 @@ class PythonConsole(QWidget):
         super().__init__(parent)
         self.setWindowTitle("Python Console")
         self.resize(700, 500)
+        self._is_shutting_down = False
 
         # Command history
         self._history = []
@@ -202,6 +207,21 @@ class PythonConsole(QWidget):
 
         # Print welcome message
         self._print_welcome()
+
+    def closeEvent(self, event):
+        """Override close to hide instead of destroy.
+
+        This implements the hide/show pattern for singleton widgets.
+        """
+        if self._is_shutting_down:
+            super().closeEvent(event)
+        else:
+            event.ignore()
+            self.hide()
+
+    def cleanup(self):
+        """Prepare for application shutdown."""
+        self._is_shutting_down = True
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
