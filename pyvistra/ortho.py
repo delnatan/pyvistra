@@ -16,7 +16,6 @@ from vispy.visuals.transforms import STTransform
 
 from .visuals import CompositeImageVisual
 from .widgets import ContrastDialog, MetadataDialog, ChannelPanel
-from .manager import manager
 
 class OrthoVisualProxy:
     """
@@ -160,9 +159,6 @@ class OrthoViewer(QMainWindow):
         self.cy = self.Y // 2
         self.cx = self.X // 2
         self.ct = 0
-
-        # Register
-        self.window_id = manager.register(self)
 
         # -- Layout --
         central = QWidget()
@@ -565,5 +561,4 @@ class OrthoViewer(QMainWindow):
         dlg.exec_()
 
     def closeEvent(self, event):
-        manager.unregister(self)
         super().closeEvent(event)
