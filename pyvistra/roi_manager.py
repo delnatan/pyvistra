@@ -228,10 +228,9 @@ class ROIManager(QWidget):
         item = self.roi_list.currentItem()
         if not item or not self.active_window:
             return
-            
+
         roi = item.data(Qt.UserRole)
-        roi.remove()
-        self.active_window.rois.remove(roi)
+        self.active_window.remove_roi(roi)
         self.refresh_list()
         self.active_window.canvas.update()
 

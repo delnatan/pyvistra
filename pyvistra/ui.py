@@ -1,3 +1,4 @@
+import heapq
 import os
 import sys
 
@@ -132,6 +133,8 @@ class ImageWindow(QMainWindow):
 
         # 8. ROI State
         self.rois = []
+        self._next_roi_id = 0
+        self._freed_roi_ids = []  # min-heap of freed IDs for reuse
         self.drawing_roi = None
         self.start_pos = None
         # Editing State
@@ -234,6 +237,31 @@ class ImageWindow(QMainWindow):
         ortho_action = QAction("Ortho View", self)
         ortho_action.triggered.connect(self.show_ortho_view)
         image_menu.addAction(ortho_action)
+
+    # ---- ROI ID Management ----
+
+    def _get_next_roi_id(self):
+        """Get next available ROI ID, reusing freed IDs when possible."""
+        if self._freed_roi_ids:
+            return heapq.heappop(self._freed_roi_ids)
+        roi_id = self._next_roi_id
+        self._next_roi_id += 1
+        return roi_id
+
+    def _free_roi_id(self, roi):
+        """Return an ROI's ID to the pool for reuse."""
+        try:
+            heapq.heappush(self._freed_roi_ids, int(roi.name))
+        except ValueError:
+            pass  # Non-numeric name, ignore
+
+    def remove_roi(self, roi):
+        """Remove an ROI from this window, freeing its ID."""
+        if roi in self.rois:
+            self._free_roi_id(roi)
+            roi.remove()
+            self.rois.remove(roi)
+            self.roi_removed.emit(roi)
 
     def show_metadata_dialog(self):
         dlg = MetadataDialog(self.meta, parent=self)
@@ -462,8 +490,8 @@ class ImageWindow(QMainWindow):
 
         self.start_pos = (x, y)
 
-        # Assign index based on current ROI count (0-indexed to match ROI manager)
-        roi_index = str(len(self.rois))
+        # Get unique ROI ID (reuses freed IDs via heapq)
+        roi_index = str(self._get_next_roi_id())
 
         if tool == "coordinate":
             self.drawing_roi = CoordinateROI(self.view, name=roi_index)
