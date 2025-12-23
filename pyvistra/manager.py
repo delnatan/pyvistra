@@ -13,24 +13,11 @@ class WindowManager(QObject):
     window_registered = Signal(object)    # Emits the window that was registered
     window_unregistered = Signal(object)  # Emits the window that was unregistered
 
-    _instance = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            # Create instance without calling QObject.__init__ yet
-            cls._instance = object.__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
-
     def __init__(self):
-        # Only initialize once
-        if self._initialized:
-            return
         super().__init__()
         self.windows = {}
         self._next_id = 1
         self.active_tool = "pointer"  # Global tool state
-        self._initialized = True
 
     def register(self, window):
         """Register a window and return its assigned ID."""
@@ -58,5 +45,5 @@ class WindowManager(QObject):
         return self.windows
 
 
-# Global instance
+# Global singleton instance
 manager = WindowManager()
