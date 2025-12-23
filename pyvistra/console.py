@@ -11,7 +11,7 @@ import traceback
 from io import StringIO
 
 from qtpy.QtCore import Qt, Signal
-from qtpy.QtGui import QFont, QTextCursor, QKeyEvent
+from qtpy.QtGui import QFont, QFontMetrics, QTextCursor, QKeyEvent
 from qtpy.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -61,9 +61,18 @@ class ConsoleInput(QPlainTextEdit):
         self._setup_font()
 
     def _setup_font(self):
-        font = QFont("Monospace", 10)
-        font.setStyleHint(QFont.TypeWriter)
+        # Use a reliable monospace font family list
+        font = QFont()
+        font.setFamilies(["Menlo", "Monaco", "Consolas", "DejaVu Sans Mono", "monospace"])
+        font.setStyleHint(QFont.Monospace)
+        font.setFixedPitch(True)
+        font.setPointSize(10)
         self.setFont(font)
+
+        # Set tab width to 4 spaces
+        metrics = QFontMetrics(font)
+        tab_width = metrics.horizontalAdvance(' ') * 4
+        self.setTabStopDistance(tab_width)
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
@@ -95,9 +104,18 @@ class ConsoleOutput(QPlainTextEdit):
         self._setup_style()
 
     def _setup_font(self):
-        font = QFont("Monospace", 10)
-        font.setStyleHint(QFont.TypeWriter)
+        # Use a reliable monospace font family list
+        font = QFont()
+        font.setFamilies(["Menlo", "Monaco", "Consolas", "DejaVu Sans Mono", "monospace"])
+        font.setStyleHint(QFont.Monospace)
+        font.setFixedPitch(True)
+        font.setPointSize(10)
         self.setFont(font)
+
+        # Set tab width to 4 spaces
+        metrics = QFontMetrics(font)
+        tab_width = metrics.horizontalAdvance(' ') * 4
+        self.setTabStopDistance(tab_width)
 
     def _setup_style(self):
         self.setStyleSheet("""
