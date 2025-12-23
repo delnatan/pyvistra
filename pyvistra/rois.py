@@ -2,17 +2,20 @@ import numpy as np
 from vispy import scene
 
 class ROI:
+    # Class-level flag to control label visibility for all ROIs
+    show_labels = True
+
     def __init__(self, view, name="ROI"):
         self.view = view
         self.name = name
         self.visuals = []
         self.data = {} # Store geometry data for serialization
-        
+
         # Editing State
         self.selected = False
         self.handle_visual = scene.visuals.Markers(
-            parent=self.view.scene, 
-            face_color='white', 
+            parent=self.view.scene,
+            face_color='white',
             edge_color='blue',
             size=12
         )
@@ -20,13 +23,42 @@ class ROI:
         self.visuals.append(self.handle_visual)
         self.handle_points = {} # id -> (x, y)
 
+        # Label visual
+        self.label_visual = scene.visuals.Text(
+            text=self.name,
+            color='white',
+            font_size=10,
+            anchor_x='center',
+            anchor_y='bottom',
+            parent=self.view.scene
+        )
+        self.label_visual.visible = ROI.show_labels
+        self.visuals.append(self.label_visual)
+
     def set_visible(self, visible):
         for v in self.visuals:
             # Don't show handles if not selected, even if ROI is visible
             if v is self.handle_visual:
                 v.visible = visible and self.selected
+            elif v is self.label_visual:
+                v.visible = visible and ROI.show_labels
             else:
                 v.visible = visible
+
+    def set_name(self, name):
+        """Update the ROI name and label."""
+        self.name = name
+        self.label_visual.text = name
+
+    def _update_label_position(self):
+        """Update label position. Override in subclasses."""
+        pass
+
+    @classmethod
+    def toggle_labels(cls):
+        """Toggle label visibility for all ROIs."""
+        cls.show_labels = not cls.show_labels
+        return cls.show_labels
 
     def remove(self):
         for v in self.visuals:
@@ -165,9 +197,18 @@ class CoordinateROI(ROI):
             edge_width=2,
             size=8
         )
-        
+
+        self._update_label_position()
+
         if self.selected:
             self._update_handles()
+
+    def _update_label_position(self):
+        if self.origin is None:
+            return
+        # Position label slightly above and to the right of origin
+        ox, oy = self.origin
+        self.label_visual.pos = (ox + 10, oy - 10, 0)
         
     def _update_visuals_from_data(self):
         # Support old format ("end") and new format ("anterior")
@@ -288,9 +329,21 @@ class RectangleROI(ROI):
         self.rect.center = (cx, cy, 0)
         self.rect.width = w
         self.rect.height = h
-        
+
+        self._update_label_position()
+
         if self.selected:
             self._update_handles()
+
+    def _update_label_position(self):
+        if "p1" not in self.data:
+            return
+        p1 = self.data["p1"]
+        p2 = self.data["p2"]
+        # Center x, top y (with small offset above)
+        cx = (p1[0] + p2[0]) / 2
+        top_y = min(p1[1], p2[1]) - 5  # 5 pixels above
+        self.label_visual.pos = (cx, top_y, 0)
         
     def _update_handles(self):
         if "p1" not in self.data: return
@@ -409,9 +462,22 @@ class CircleROI(ROI):
         
         self.circle.center = (cx, cy, 0)
         self.circle.radius = max(radius, 1e-6)
-        
+
+        self._update_label_position()
+
         if self.selected:
             self._update_handles()
+
+    def _update_label_position(self):
+        if "center" not in self.data:
+            return
+        cx, cy = self.data["center"]
+        # Calculate radius from edge point
+        ex, ey = self.data.get("edge", (cx, cy))
+        radius = np.sqrt((ex - cx)**2 + (ey - cy)**2)
+        # Position label above the circle
+        top_y = cy - radius - 5
+        self.label_visual.pos = (cx, top_y, 0)
             
     def _update_handles(self):
         if "center" not in self.data: return
@@ -488,14 +554,26 @@ class LineROI(ROI):
         
     def update(self, p1, p2):
         self.data = {"p1": p1, "p2": p2}
-        
+
         pos = np.zeros((2, 3))
         pos[0, :2] = p1
         pos[1, :2] = p2
         self.line.set_data(pos=pos)
-        
+
+        self._update_label_position()
+
         if self.selected:
             self._update_handles()
+
+    def _update_label_position(self):
+        if "p1" not in self.data:
+            return
+        p1 = self.data["p1"]
+        p2 = self.data["p2"]
+        # Midpoint of line, slightly above
+        mx = (p1[0] + p2[0]) / 2
+        my = min(p1[1], p2[1]) - 5
+        self.label_visual.pos = (mx, my, 0)
             
     def _update_handles(self):
         if "p1" not in self.data: return

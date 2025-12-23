@@ -1,9 +1,10 @@
+import heapq
 import os
 import sys
 
 import numpy as np
 from qtpy import API_NAME
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, Signal
 from qtpy.QtGui import QDragEnterEvent, QDropEvent
 from qtpy.QtWidgets import (
     QAction,
@@ -37,6 +38,16 @@ except Exception:
 
 
 class ImageWindow(QMainWindow):
+    """Main image viewer window with ROI support."""
+
+    # Signals for decoupled communication
+    window_activated = Signal(object)    # Emits self when window becomes active
+    window_shown = Signal(object)        # Emits self when window is shown
+    window_closing = Signal(object)      # Emits self when window is closing
+    roi_added = Signal(object)           # Emits the ROI that was added
+    roi_removed = Signal(object)         # Emits the ROI that was removed
+    roi_selection_changed = Signal(object)  # Emits the selected ROI (or None)
+
     def __init__(self, data_or_path, title="Image"):
         super().__init__()
         self.setAttribute(Qt.WA_DeleteOnClose)
@@ -98,7 +109,8 @@ class ImageWindow(QMainWindow):
         self.layout.addWidget(self.info_label, 0)
 
         # 5. Visuals
-        self.renderer = CompositeImageVisual(self.view, self.img_data)
+        is_rgb = self.meta.get("is_rgb", False)
+        self.renderer = CompositeImageVisual(self.view, self.img_data, is_rgb=is_rgb)
         self.renderer.reset_camera(self.img_data.shape)
 
         # 6. Controls Area (Sliders + Mode)
@@ -121,6 +133,8 @@ class ImageWindow(QMainWindow):
 
         # 8. ROI State
         self.rois = []
+        self._next_roi_id = 0
+        self._freed_roi_ids = []  # min-heap of freed IDs for reuse
         self.drawing_roi = None
         self.start_pos = None
         # Editing State
@@ -140,13 +154,17 @@ class ImageWindow(QMainWindow):
         # Initial Draw
         self.update_view()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.window_shown.emit(self)
+
     def closeEvent(self, event):
         manager.unregister(self)
-        get_roi_manager().remove_window(self)
+        self.window_closing.emit(self)
         super().closeEvent(event)
 
     def focusInEvent(self, event):
-        get_roi_manager().set_active_window(self)
+        self.window_activated.emit(self)
         super().focusInEvent(event)
 
     def keyPressEvent(self, event):
@@ -160,13 +178,21 @@ class ImageWindow(QMainWindow):
                     roi.flip()
                     self.canvas.update()
                     break
+        elif event.key() == Qt.Key_L:
+            # Toggle ROI labels visibility
+            from .rois import ROI
+            show = ROI.toggle_labels()
+            # Update visibility for all ROIs in all windows
+            for w in manager.get_all().values():
+                for roi in w.rois:
+                    roi.label_visual.visible = show
+                w.canvas.update()
         elif event.key() == Qt.Key_Escape:
             # Deselect all ROIs
             for roi in self.rois:
                 roi.select(False)
             self.canvas.update()
-            # Notify Manager (optional, but good for sync)
-            get_roi_manager().select_roi(None)
+            self.roi_selection_changed.emit(None)
         else:
             super().keyPressEvent(event)
 
@@ -211,6 +237,31 @@ class ImageWindow(QMainWindow):
         ortho_action = QAction("Ortho View", self)
         ortho_action.triggered.connect(self.show_ortho_view)
         image_menu.addAction(ortho_action)
+
+    # ---- ROI ID Management ----
+
+    def _get_next_roi_id(self):
+        """Get next available ROI ID, reusing freed IDs when possible."""
+        if self._freed_roi_ids:
+            return heapq.heappop(self._freed_roi_ids)
+        roi_id = self._next_roi_id
+        self._next_roi_id += 1
+        return roi_id
+
+    def _free_roi_id(self, roi):
+        """Return an ROI's ID to the pool for reuse."""
+        try:
+            heapq.heappush(self._freed_roi_ids, int(roi.name))
+        except ValueError:
+            pass  # Non-numeric name, ignore
+
+    def remove_roi(self, roi):
+        """Remove an ROI from this window, freeing its ID."""
+        if roi in self.rois:
+            self._free_roi_id(roi)
+            roi.remove()
+            self.rois.remove(roi)
+            self.roi_removed.emit(roi)
 
     def show_metadata_dialog(self):
         dlg = MetadataDialog(self.meta, parent=self)
@@ -404,6 +455,9 @@ class ImageWindow(QMainWindow):
         tool = manager.active_tool
         x, y = self._map_event_to_image(event)
 
+        # Notify that this window is now active
+        self.window_activated.emit(self)
+
         if tool == "pointer":
             # Hit Test (Reverse order to select top-most)
             hit_roi = None
@@ -420,13 +474,15 @@ class ImageWindow(QMainWindow):
             for roi in self.rois:
                 roi.select(roi is hit_roi)
 
-            # Notify Manager
-            get_roi_manager().select_roi(hit_roi)
+            # Notify about selection change
+            self.roi_selection_changed.emit(hit_roi)
 
             if hit_roi:
                 self.dragging_roi = hit_roi
                 self.drag_handle = hit_handle
                 self.last_pos = (x, y)
+                # Disable camera panning while dragging ROI
+                self.view.camera.interactive = False
                 self.canvas.update()
             else:
                 self.canvas.update()
@@ -434,18 +490,21 @@ class ImageWindow(QMainWindow):
 
         self.start_pos = (x, y)
 
+        # Get unique ROI ID (reuses freed IDs via heapq)
+        roi_index = str(self._get_next_roi_id())
+
         if tool == "coordinate":
-            self.drawing_roi = CoordinateROI(self.view)
+            self.drawing_roi = CoordinateROI(self.view, name=roi_index)
         elif tool == "rect":
-            self.drawing_roi = RectangleROI(self.view)
+            self.drawing_roi = RectangleROI(self.view, name=roi_index)
         elif tool == "circle":
-            self.drawing_roi = CircleROI(self.view)
+            self.drawing_roi = CircleROI(self.view, name=roi_index)
         elif tool == "line":
-            self.drawing_roi = LineROI(self.view)
+            self.drawing_roi = LineROI(self.view, name=roi_index)
 
         if self.drawing_roi:
             self.rois.append(self.drawing_roi)
-            get_roi_manager().add_roi(self.drawing_roi)
+            self.roi_added.emit(self.drawing_roi)
             # Initial update (zero size/length)
             self.drawing_roi.update((x, y), (x, y))
             self.canvas.update()
@@ -490,7 +549,21 @@ class ImageWindow(QMainWindow):
         # 3. Update Drawing
         if self.drawing_roi and event.button == 1:
             x, y = self._map_event_to_image(event)
-            self.drawing_roi.update(self.start_pos, (x, y))
+            end_pos = (x, y)
+
+            # Shift key constrains LineROI to horizontal/vertical
+            if isinstance(self.drawing_roi, LineROI) and 'Shift' in event.modifiers:
+                sx, sy = self.start_pos
+                dx = abs(x - sx)
+                dy = abs(y - sy)
+                if dx > dy:
+                    # Horizontal line
+                    end_pos = (x, sy)
+                else:
+                    # Vertical line
+                    end_pos = (sx, y)
+
+            self.drawing_roi.update(self.start_pos, end_pos)
             self.canvas.update()
 
     def on_mouse_release(self, event):
@@ -498,6 +571,9 @@ class ImageWindow(QMainWindow):
             self.dragging_roi = None
             self.drag_handle = None
             self.last_pos = None
+            # Re-enable camera panning if in pointer mode
+            if manager.active_tool == "pointer":
+                self.view.camera.interactive = True
 
         if self.drawing_roi:
             self.drawing_roi = None

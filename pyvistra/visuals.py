@@ -67,11 +67,12 @@ class CompositeImageVisual:
     multi-channel rendering using additive blending.
     """
 
-    def __init__(self, view, image_data, scale=(1.0, 1.0)):
+    def __init__(self, view, image_data, scale=(1.0, 1.0), is_rgb=False):
         self.data = image_data
         self.view = view
         self.scale = scale # (sy, sx)
         self.layers = []
+        self.is_rgb = is_rgb  # True for RGB color images
 
         # State
         self.mode = "composite"
@@ -112,6 +113,9 @@ class CompositeImageVisual:
         for c in range(n_channels):
             if n_channels == 1:
                 cmap_name = "White"
+            elif self.is_rgb and c < 3:
+                # Use RGB colormaps for RGB images
+                cmap_name = RGB_COLORMAPS[c]
             else:
                 cmap_name = DEFAULT_CHANNEL_COLORMAPS[c % len(DEFAULT_CHANNEL_COLORMAPS)]
 

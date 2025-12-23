@@ -3,6 +3,65 @@ import matplotlib.pyplot as plt
 from magicgui import magicgui
 from .rois import LineROI, RectangleROI, CircleROI
 
+
+# ---- Lane Analysis Functions ----
+
+def get_rect_bounds(roi):
+    """Get normalized bounds (left, right, top, bottom) from a RectangleROI."""
+    p1 = roi.data.get("p1", (0, 0))
+    p2 = roi.data.get("p2", (0, 0))
+    left = min(p1[0], p2[0])
+    right = max(p1[0], p2[0])
+    top = min(p1[1], p2[1])
+    bottom = max(p1[1], p2[1])
+    return left, right, top, bottom
+
+
+def align_lanes(rois, reference='top'):
+    """
+    Align RectangleROIs to a common edge.
+
+    For gel analysis, lanes should share a common origin (loading wells).
+    This function aligns the top edges of all rectangles.
+
+    Args:
+        rois: List of RectangleROI objects
+        reference: 'top' or 'bottom' - which edge to align
+
+    Returns:
+        int: Number of ROIs aligned
+    """
+    # Filter to only RectangleROIs
+    rect_rois = [r for r in rois if isinstance(r, RectangleROI)]
+
+    if len(rect_rois) < 2:
+        print("Need at least 2 rectangle ROIs to align")
+        return 0
+
+    # Find reference y-coordinate
+    if reference == 'top':
+        # Find minimum top (smallest y = topmost in image coords)
+        target_y = min(get_rect_bounds(r)[2] for r in rect_rois)
+    else:  # bottom
+        # Find maximum bottom
+        target_y = max(get_rect_bounds(r)[3] for r in rect_rois)
+
+    aligned_count = 0
+    for roi in rect_rois:
+        left, right, top, bottom = get_rect_bounds(roi)
+
+        if reference == 'top':
+            delta_y = target_y - top
+        else:
+            delta_y = target_y - bottom
+
+        if abs(delta_y) > 0.1:  # Only move if needed
+            roi.move((0, delta_y))
+            aligned_count += 1
+
+    print(f"Aligned {aligned_count} lanes to {reference} edge (y={target_y:.1f})")
+    return aligned_count
+
 @magicgui(call_button="Plot Profile")
 def plot_profile(image_data, roi: LineROI):
     """
