@@ -11,7 +11,7 @@ import traceback
 from io import StringIO
 
 from qtpy.QtCore import Qt, Signal
-from qtpy.QtGui import QFont, QFontMetrics, QTextCursor, QKeyEvent
+from qtpy.QtGui import QFont, QFontDatabase, QFontMetrics, QTextCursor, QKeyEvent
 from qtpy.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -61,11 +61,8 @@ class ConsoleInput(QPlainTextEdit):
         self._setup_font()
 
     def _setup_font(self):
-        # Use a reliable monospace font family list
-        font = QFont()
-        font.setFamilies(["Menlo", "Monaco", "Consolas", "DejaVu Sans Mono", "monospace"])
-        font.setStyleHint(QFont.Monospace)
-        font.setFixedPitch(True)
+        # Get system's default fixed-width font
+        font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
         font.setPointSize(10)
         self.setFont(font)
 
@@ -104,11 +101,8 @@ class ConsoleOutput(QPlainTextEdit):
         self._setup_style()
 
     def _setup_font(self):
-        # Use a reliable monospace font family list
-        font = QFont()
-        font.setFamilies(["Menlo", "Monaco", "Consolas", "DejaVu Sans Mono", "monospace"])
-        font.setStyleHint(QFont.Monospace)
-        font.setFixedPitch(True)
+        # Get system's default fixed-width font
+        font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
         font.setPointSize(10)
         self.setFont(font)
 
