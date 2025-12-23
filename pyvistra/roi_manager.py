@@ -7,7 +7,7 @@ from qtpy.QtWidgets import (
 from qtpy.QtCore import Qt
 from .manager import manager
 from .rois import CoordinateROI, RectangleROI, CircleROI, LineROI
-from .analysis import plot_profile, crop_image, measure_intensity
+from .analysis import plot_profile, crop_image, measure_intensity, align_lanes
 
 
 class ROIManager(QWidget):
@@ -83,6 +83,13 @@ class ROIManager(QWidget):
         action_measure = QAction("Measure Intensity", self)
         action_measure.triggered.connect(lambda: self.run_analysis(measure_intensity))
         analysis_menu.addAction(action_measure)
+
+        # Lanes Menu
+        lanes_menu = self.menu_bar.addMenu("Lanes")
+
+        action_align = QAction("Align Lanes", self)
+        action_align.triggered.connect(self.align_lanes_action)
+        lanes_menu.addAction(action_align)
 
     def showEvent(self, event):
         """Refresh window list when ROI manager is shown."""
@@ -321,6 +328,15 @@ class ROIManager(QWidget):
             
         self.refresh_list()
         self.active_window.canvas.update()
+
+    def align_lanes_action(self):
+        """Align all RectangleROIs to the topmost edge."""
+        if not self.active_window:
+            print("No active window")
+            return
+        count = align_lanes(self.active_window.rois, reference='top')
+        if count > 0:
+            self.active_window.canvas.update()
 
     def run_analysis(self, func):
         item = self.roi_list.currentItem()
