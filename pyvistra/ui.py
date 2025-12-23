@@ -748,6 +748,12 @@ class Toolbar(QMainWindow):
         for w in windows:
             w.close()
 
+        # Quit Vispy's app to ensure clean OpenGL context shutdown
+        try:
+            app.quit()
+        except Exception:
+            pass
+
         super().closeEvent(event)
 
     def spawn_viewer(self, filepath):
