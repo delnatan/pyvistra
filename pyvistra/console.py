@@ -327,6 +327,53 @@ class PythonConsole(QWidget):
         self.namespace["load_image"] = load_image
         self.namespace["save_tiff"] = save_tiff
 
+        # Add reload helper for hot-reloading modules during prototyping
+        import importlib
+
+        def reload(module_or_name):
+            """
+            Reload a module by name or reference.
+
+            Usage:
+                reload('lab')           # Reload pyvistra.lab
+                reload('mymodule')      # Reload mymodule from cwd
+                reload(some_module)     # Reload a module object
+
+            After reload, updated functions are available immediately.
+            """
+            if isinstance(module_or_name, str):
+                name = module_or_name
+                # Try pyvistra submodule first
+                try:
+                    mod = importlib.import_module(f".{name}", package="pyvistra")
+                except ImportError:
+                    # Try as top-level module (e.g., from cwd)
+                    mod = importlib.import_module(name)
+            else:
+                mod = module_or_name
+
+            reloaded = importlib.reload(mod)
+            # Update namespace with module contents
+            self.namespace[reloaded.__name__.split('.')[-1]] = reloaded
+            print(f"Reloaded: {reloaded.__name__}")
+            return reloaded
+
+        self.namespace["reload"] = reload
+
+        # Try to import lab module if it exists
+        try:
+            from . import lab
+            self.namespace["lab"] = lab
+        except ImportError:
+            pass
+
+        # Add clear function (closure over self)
+        def clear():
+            """Clear the console output."""
+            self.clear()
+
+        self.namespace["clear"] = clear
+
     def _print_welcome(self):
         """Print welcome message with available objects."""
         welcome = """pyvistra Python Console
@@ -342,11 +389,16 @@ Available objects:
   load_image()- Load image file
   save_tiff() - Save as TIFF
 
+Prototyping:
+  lab         - Lab module (pyvistra/lab.py) for experiments
+  reload()    - Hot-reload a module: reload('lab')
+  clear()     - Clear console output
+
 Example:
   >>> w = aw()          # Get active window
   >>> data = w.img_data # Access 5D data (T,Z,C,Y,X)
   >>> w.rois            # List of ROIs
-  >>> np.max(data[0, 0, 0, :, :])  # Max of first slice
+  >>> reload('lab')     # Reload after editing lab.py
 """
         self.output.append_text(welcome, "#888888")
 
