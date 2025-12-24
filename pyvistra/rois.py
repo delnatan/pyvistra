@@ -120,7 +120,6 @@ class CoordinateROI(ROI):
     def __init__(self, view, name="Coordinate"):
         super().__init__(view, name)
         self.origin = None
-        self.vector = None
         self.flipped = False
         
         # Visuals
@@ -158,7 +157,6 @@ class CoordinateROI(ROI):
         """
         self.origin = np.array(p1)
         anterior_vec = np.array(p2) - self.origin
-        self.vector = anterior_vec # Keep for compatibility if needed, but prefer specific names
         
         # Orthogonal vector (Dorsal) (-y, x)
         # If flipped, we negate it (or just rotate the other way)
@@ -214,18 +212,9 @@ class CoordinateROI(ROI):
         self.label_visual.pos = (ox + 10, oy - 10, 0)
         
     def _update_visuals_from_data(self):
-        # Support old format ("end") and new format ("anterior")
-        if "origin" in self.data:
-            # Restore state
+        if "origin" in self.data and "anterior" in self.data:
             self.flipped = self.data.get("flipped", False)
-            
-            origin = self.data["origin"]
-            if "anterior" in self.data:
-                anterior = self.data["anterior"]
-                self.update(origin, anterior)
-            elif "end" in self.data:
-                # Legacy support
-                self.update(origin, self.data["end"])
+            self.update(self.data["origin"], self.data["anterior"])
 
     def flip(self):
         """Flip the dorsal vector direction."""
@@ -234,14 +223,12 @@ class CoordinateROI(ROI):
             self.update(self.data["origin"], self.data["anterior"])
 
     def _update_handles(self):
-        if "origin" not in self.data: return
-        
-        origin = self.data["origin"]
-        anterior = self.data["anterior"] if "anterior" in self.data else self.data.get("end")
-        
+        if "origin" not in self.data or "anterior" not in self.data:
+            return
+
         self.handle_points = {
-            "origin": origin,
-            "anterior": anterior
+            "origin": self.data["origin"],
+            "anterior": self.data["anterior"]
         }
         
         pts = list(self.handle_points.values())
