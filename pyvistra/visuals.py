@@ -1,8 +1,9 @@
+import matplotlib.cm as mpl_cm
 import numpy as np
 from vispy import scene
-from vispy.scene.transforms import MatrixTransform, STTransform, ChainTransform
 from vispy.color import Colormap
-import matplotlib.cm as mpl_cm
+from vispy.visuals.transforms.chain import ChainTransform
+from vispy.visuals.transforms.linear import MatrixTransform, STTransform
 
 
 def mpl_to_vispy_colormap(name, n_colors=256):
@@ -40,7 +41,14 @@ COLORMAPS = {
 }
 
 # Default channel colormaps (original microscope colors)
-DEFAULT_CHANNEL_COLORMAPS = ["Orange", "Green", "Cyan", "Magenta", "Yellow", "White"]
+DEFAULT_CHANNEL_COLORMAPS = [
+    "Orange",
+    "Green",
+    "Cyan",
+    "Magenta",
+    "Yellow",
+    "White",
+]
 
 # Standard RGB colormaps for RGB images
 RGB_COLORMAPS = ["Red", "Pure Green", "Blue"]
@@ -71,7 +79,7 @@ class CompositeImageVisual:
     def __init__(self, view, image_data, scale=(1.0, 1.0), is_rgb=False):
         self.data = image_data
         self.view = view
-        self.scale = scale # (sy, sx)
+        self.scale = scale  # (sy, sx)
         self.layers = []
         self.is_rgb = is_rgb  # True for RGB color images
 
@@ -123,7 +131,9 @@ class CompositeImageVisual:
                 # Use RGB colormaps for RGB images
                 cmap_name = RGB_COLORMAPS[c]
             else:
-                cmap_name = DEFAULT_CHANNEL_COLORMAPS[c % len(DEFAULT_CHANNEL_COLORMAPS)]
+                cmap_name = DEFAULT_CHANNEL_COLORMAPS[
+                    c % len(DEFAULT_CHANNEL_COLORMAPS)
+                ]
 
             # Get colormap and associated display color
             cmap, display_color = get_colormap(cmap_name)
@@ -140,7 +150,7 @@ class CompositeImageVisual:
                 method="auto",
                 interpolation="nearest",
             )
-            
+
             # Apply combined transform (scale + rotation + translation)
             image_visual.transform = self._build_transform()
 
@@ -191,11 +201,13 @@ class CompositeImageVisual:
         # Handle Z-Stack Projection
         # If z_idx is a slice, volume_slice will be (Z, C, Y, X) or (Z, Y, X)
         # We need to project it to (C, Y, X) or (Y, X)
-        if volume_slice.ndim == 4: # (Z, C, Y, X)
+        if volume_slice.ndim == 4:  # (Z, C, Y, X)
             volume_slice = np.max(volume_slice, axis=0)
-        elif volume_slice.ndim == 3 and isinstance(z_idx, slice): # (Z, Y, X) -> (Y, X)
-             # Ambiguous if C=Z? But if z_idx is slice, dim 0 is Z.
-             volume_slice = np.max(volume_slice, axis=0)
+        elif volume_slice.ndim == 3 and isinstance(
+            z_idx, slice
+        ):  # (Z, Y, X) -> (Y, X)
+            # Ambiguous if C=Z? But if z_idx is slice, dim 0 is Z.
+            volume_slice = np.max(volume_slice, axis=0)
 
         if volume_slice.ndim == 2:
             volume_slice = volume_slice[np.newaxis, :, :]
@@ -317,7 +329,11 @@ class CompositeImageVisual:
 
         scale_tf = STTransform(scale=(sx, sy))
 
-        if self._rotation_deg == 0.0 and self._translate_x == 0.0 and self._translate_y == 0.0:
+        if (
+            self._rotation_deg == 0.0
+            and self._translate_x == 0.0
+            and self._translate_y == 0.0
+        ):
             # No rotation/translation, just use simple scale
             return scale_tf
 
@@ -330,7 +346,9 @@ class CompositeImageVisual:
         rotation = MatrixTransform()
         rotation.rotate(self._rotation_deg, (0, 0, 1))  # Rotate around Z axis
 
-        from_origin = STTransform(translate=(cx + self._translate_x, cy + self._translate_y))
+        from_origin = STTransform(
+            translate=(cx + self._translate_x, cy + self._translate_y)
+        )
 
         # Chain: scale first, then to_origin, then rotate, then from_origin
         # VisPy ChainTransform applies transforms in order (first in list applied first)
@@ -369,7 +387,9 @@ class CompositeImageVisual:
         self._translate_y = float(value)
         self._apply_transform_to_layers()
 
-    def set_transform(self, rotation_deg=None, translate_x=None, translate_y=None):
+    def set_transform(
+        self, rotation_deg=None, translate_x=None, translate_y=None
+    ):
         """Set multiple transform parameters at once (avoids multiple rebuilds)."""
         if rotation_deg is not None:
             self._rotation_deg = float(rotation_deg)
