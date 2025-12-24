@@ -1,4 +1,5 @@
 import json
+import os
 from qtpy.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QPushButton,
     QLabel, QFileDialog, QListWidgetItem, QComboBox, QMenuBar, QAction,
@@ -352,13 +353,11 @@ class ROIManager(QWidget):
         default_name = "rois.json"
         
         if self.active_window.filepath:
-            import os
             default_dir = os.path.dirname(self.active_window.filepath)
             base_name = os.path.basename(self.active_window.filepath)
             name_without_ext = os.path.splitext(base_name)[0]
             default_name = f"{name_without_ext}.json"
-            
-        import os
+
         default_path = os.path.join(default_dir, default_name)
 
         path, _ = QFileDialog.getSaveFileName(self, "Save ROIs", default_path, "JSON Files (*.json)")
@@ -378,13 +377,11 @@ class ROIManager(QWidget):
         default_name = "rois.json"
         
         if self.active_window.filepath:
-            import os
             default_dir = os.path.dirname(self.active_window.filepath)
             base_name = os.path.basename(self.active_window.filepath)
             name_without_ext = os.path.splitext(base_name)[0]
             default_name = f"{name_without_ext}.json"
-            
-        import os
+
         default_path = os.path.join(default_dir, default_name)
 
         path, _ = QFileDialog.getOpenFileName(self, "Load ROIs", default_path, "JSON Files (*.json)")
@@ -409,7 +406,8 @@ class ROIManager(QWidget):
                 
             roi.from_dict(item["data"])
             self.active_window.rois.append(roi)
-            
+            self.active_window.roi_added.emit(roi)
+
         self.refresh_list()
         self.active_window.canvas.update()
 
