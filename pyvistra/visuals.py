@@ -1,5 +1,6 @@
 import numpy as np
 from vispy import scene
+from vispy.scene.transforms import MatrixTransform, STTransform, ChainTransform
 from vispy.color import Colormap
 import matplotlib.cm as mpl_cm
 
@@ -84,6 +85,11 @@ class CompositeImageVisual:
         self.channel_colormaps = {}  # Maps channel index to colormap name
         self.channel_visibility = {}  # Maps channel index to visibility (True/False)
 
+        # Transform state (rotation/translation for image alignment)
+        self._rotation_deg = 0.0
+        self._translate_x = 0.0
+        self._translate_y = 0.0
+
         # Legacy color list for histogram display (derived from colormap)
         self.channel_colors = [
             "#ffb100",
@@ -135,12 +141,8 @@ class CompositeImageVisual:
                 interpolation="nearest",
             )
             
-            # Apply Scale
-            # Note: Vispy Image visual expects (x, y) scale, but our input is usually (y, x)
-            # if we follow numpy convention.
-            # self.scale is (sy, sx). STTransform takes (sx, sy).
-            sy, sx = self.scale
-            image_visual.transform = scene.transforms.STTransform(scale=(sx, sy))
+            # Apply combined transform (scale + rotation + translation)
+            image_visual.transform = self._build_transform()
 
             # Force Additive Blending
             image_visual.set_gl_state(
@@ -297,3 +299,89 @@ class CompositeImageVisual:
         sy, sx = self.scale
         self.view.camera.rect = (0, 0, X * sx, Y * sy)
         self.view.camera.flip = (False, True, False)
+
+    def _build_transform(self):
+        """Build the combined transform: scale * rotation_around_center * translation."""
+        sy, sx = self.scale
+        _, _, _, Y, X = self.data.shape
+
+        # Image center in scaled coordinates
+        cx = X * sx / 2
+        cy = Y * sy / 2
+
+        # Build transform chain:
+        # 1. Scale (pixel scale for physical units)
+        # 2. Translate to origin (center image at origin)
+        # 3. Rotate
+        # 4. Translate back + user translation
+
+        scale_tf = STTransform(scale=(sx, sy))
+
+        if self._rotation_deg == 0.0 and self._translate_x == 0.0 and self._translate_y == 0.0:
+            # No rotation/translation, just use simple scale
+            return scale_tf
+
+        # For rotation around center:
+        # final_pos = R @ (pos - center) + center + translation
+        # Which is: translate(-cx, -cy) -> rotate -> translate(cx + tx, cy + ty)
+
+        to_origin = STTransform(translate=(-cx, -cy))
+
+        rotation = MatrixTransform()
+        rotation.rotate(self._rotation_deg, (0, 0, 1))  # Rotate around Z axis
+
+        from_origin = STTransform(translate=(cx + self._translate_x, cy + self._translate_y))
+
+        # Chain: scale first, then to_origin, then rotate, then from_origin
+        # VisPy ChainTransform applies transforms in order (first in list applied first)
+        return ChainTransform([scale_tf, to_origin, rotation, from_origin])
+
+    def _apply_transform_to_layers(self):
+        """Apply the current transform to all image layers."""
+        transform = self._build_transform()
+        for layer in self.layers:
+            layer.transform = transform
+
+    @property
+    def rotation_deg(self):
+        return self._rotation_deg
+
+    @rotation_deg.setter
+    def rotation_deg(self, value):
+        self._rotation_deg = float(value)
+        self._apply_transform_to_layers()
+
+    @property
+    def translate_x(self):
+        return self._translate_x
+
+    @translate_x.setter
+    def translate_x(self, value):
+        self._translate_x = float(value)
+        self._apply_transform_to_layers()
+
+    @property
+    def translate_y(self):
+        return self._translate_y
+
+    @translate_y.setter
+    def translate_y(self, value):
+        self._translate_y = float(value)
+        self._apply_transform_to_layers()
+
+    def set_transform(self, rotation_deg=None, translate_x=None, translate_y=None):
+        """Set multiple transform parameters at once (avoids multiple rebuilds)."""
+        if rotation_deg is not None:
+            self._rotation_deg = float(rotation_deg)
+        if translate_x is not None:
+            self._translate_x = float(translate_x)
+        if translate_y is not None:
+            self._translate_y = float(translate_y)
+        self._apply_transform_to_layers()
+
+    def reset_transform(self):
+        """Reset rotation and translation to identity."""
+        self._rotation_deg = 0.0
+        self._translate_x = 0.0
+        self._translate_y = 0.0
+        self._apply_transform_to_layers()

@@ -30,7 +30,7 @@ from .roi_manager import get_roi_manager, roi_manager_exists
 from .console import get_console, console_exists
 from .rois import CircleROI, CoordinateROI, LineROI, RectangleROI
 from .visuals import CompositeImageVisual
-from .widgets import ChannelPanel, ContrastDialog, MetadataDialog
+from .widgets import AlignmentDialog, ChannelPanel, ContrastDialog, MetadataDialog, TransformDialog
 
 try:
     app.use_app(API_NAME)
@@ -130,6 +130,8 @@ class ImageWindow(QMainWindow):
         # 7. Menu & Dialogs
         self.contrast_dialog = None
         self.channel_panel = None
+        self.transform_dialog = None
+        self._alignment_dialog = None  # Shared singleton
         self._setup_menu()
 
         # 8. ROI State
@@ -239,6 +241,17 @@ class ImageWindow(QMainWindow):
         ortho_action.triggered.connect(self.show_ortho_view)
         image_menu.addAction(ortho_action)
 
+        image_menu.addSeparator()
+
+        transform_action = QAction("Transform...", self)
+        transform_action.setShortcut("Shift+T")
+        transform_action.triggered.connect(self.show_transform_dialog)
+        image_menu.addAction(transform_action)
+
+        align_action = QAction("Align Images...", self)
+        align_action.triggered.connect(self.show_alignment_dialog)
+        image_menu.addAction(align_action)
+
     # ---- ROI ID Management ----
 
     def _get_next_roi_id(self):
@@ -296,6 +309,19 @@ class ImageWindow(QMainWindow):
         self.channel_panel.show()
         self.channel_panel.raise_()
         self.channel_panel.refresh_ui()
+
+    def show_transform_dialog(self):
+        if self.transform_dialog is None:
+            self.transform_dialog = TransformDialog(self, parent=self)
+        self.transform_dialog.show()
+        self.transform_dialog.raise_()
+        self.transform_dialog.refresh_ui()
+
+    def show_alignment_dialog(self):
+        if self._alignment_dialog is None:
+            self._alignment_dialog = AlignmentDialog(parent=self)
+        self._alignment_dialog.show()
+        self._alignment_dialog.raise_()
 
     def set_tool(self, tool_name):
         """
