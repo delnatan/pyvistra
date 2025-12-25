@@ -1526,7 +1526,6 @@ class AlignmentDialog(QDialog):
 
     def _build_overlay_transform(self):
         """Build transform for overlay layers."""
-        import math
         from vispy.scene.transforms import MatrixTransform, STTransform
 
         if not self._query_window:
@@ -1547,22 +1546,14 @@ class AlignmentDialog(QDialog):
         if rot_deg == 0.0 and tx == 0.0 and ty == 0.0:
             return STTransform(scale=(sx, sy))
 
-        # Build a single affine matrix for: scale -> rotate around center -> translate
-        theta = math.radians(rot_deg)
-        cos_t = math.cos(theta)
-        sin_t = math.sin(theta)
-
-        # Translation component for rotation around center
-        tx_total = (1 - cos_t) * cx + sin_t * cy + tx
-        ty_total = (1 - cos_t) * cy - sin_t * cx + ty
-
+        # Build transform using MatrixTransform methods
+        # Operations are applied in reverse order of how they're added
         transform = MatrixTransform()
-        transform.matrix = [
-            [sx * cos_t, sx * sin_t, 0, 0],
-            [-sy * sin_t, sy * cos_t, 0, 0],
-            [0, 0, 1, 0],
-            [tx_total, ty_total, 0, 1],
-        ]
+        transform.translate((cx + tx, cy + ty, 0))
+        transform.rotate(rot_deg, (0, 0, 1))
+        transform.translate((-cx, -cy, 0))
+        transform.scale((sx, sy, 1))
+
         return transform
 
     def _update_overlay_transform(self):

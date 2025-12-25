@@ -314,8 +314,6 @@ class CompositeImageVisual:
 
     def _build_transform(self):
         """Build the combined transform: scale * rotation_around_center * translation."""
-        import math
-
         sy, sx = self.scale
         _, _, _, Y, X = self.data.shape
 
@@ -331,27 +329,16 @@ class CompositeImageVisual:
         ):
             return STTransform(scale=(sx, sy))
 
-        # Build a single affine matrix for: scale -> rotate around center -> translate
-        # This ensures rotation happens around the image center
-        theta = math.radians(self._rotation_deg)
-        cos_t = math.cos(theta)
-        sin_t = math.sin(theta)
-
-        # Combined transform matrix (in 2D homogeneous coordinates, extended to 4x4)
-        # For point P: P' = R @ S @ P + (I - R) @ C + T
-        # Where S = scale, R = rotation, C = center, T = translation
-
-        # Translation component for rotation around center
-        tx_total = (1 - cos_t) * cx + sin_t * cy + self._translate_x
-        ty_total = (1 - cos_t) * cy - sin_t * cx + self._translate_y
-
+        # Build transform using MatrixTransform methods
+        # Operations are applied in reverse order of how they're added
+        # We want: scale -> translate(-center) -> rotate -> translate(center + offset)
+        # So we add them in reverse: translate(center+offset), rotate, translate(-center), scale
         transform = MatrixTransform()
-        transform.matrix = [
-            [sx * cos_t, sx * sin_t, 0, 0],
-            [-sy * sin_t, sy * cos_t, 0, 0],
-            [0, 0, 1, 0],
-            [tx_total, ty_total, 0, 1],
-        ]
+        transform.translate((cx + self._translate_x, cy + self._translate_y, 0))
+        transform.rotate(self._rotation_deg, (0, 0, 1))
+        transform.translate((-cx, -cy, 0))
+        transform.scale((sx, sy, 1))
+
         return transform
 
     def _apply_transform_to_layers(self):
