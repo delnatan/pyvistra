@@ -329,15 +329,21 @@ class CompositeImageVisual:
         ):
             return STTransform(scale=(sx, sy))
 
-        # Build transform using MatrixTransform methods
-        # Operations are applied in reverse order of how they're added
-        # We want: scale -> translate(-center) -> rotate -> translate(center + offset)
-        # So we add them in reverse: translate(center+offset), rotate, translate(-center), scale
+        # Build transform for rotation around image center:
+        # 1. Scale the image
+        # 2. Translate so scaled center is at origin
+        # 3. Rotate
+        # 4. Translate back + user offset
+        #
+        # Matrix form: T_back @ R @ T_to_origin @ S
+        #
+        # VisPy's methods do: self.matrix = self.matrix @ new_transform
+        # So we build left-to-right to get the correct composition
         transform = MatrixTransform()
-        transform.translate((cx + self._translate_x, cy + self._translate_y, 0))
-        transform.rotate(self._rotation_deg, (0, 0, 1))
-        transform.translate((-cx, -cy, 0))
         transform.scale((sx, sy, 1))
+        transform.translate((-cx, -cy, 0))
+        transform.rotate(self._rotation_deg, (0, 0, 1))
+        transform.translate((cx + self._translate_x, cy + self._translate_y, 0))
 
         return transform
 

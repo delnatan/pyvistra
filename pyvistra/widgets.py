@@ -1546,13 +1546,13 @@ class AlignmentDialog(QDialog):
         if rot_deg == 0.0 and tx == 0.0 and ty == 0.0:
             return STTransform(scale=(sx, sy))
 
-        # Build transform using MatrixTransform methods
-        # Operations are applied in reverse order of how they're added
+        # Build transform for rotation around image center:
+        # 1. Scale, 2. Translate center to origin, 3. Rotate, 4. Translate back + offset
         transform = MatrixTransform()
-        transform.translate((cx + tx, cy + ty, 0))
-        transform.rotate(rot_deg, (0, 0, 1))
-        transform.translate((-cx, -cy, 0))
         transform.scale((sx, sy, 1))
+        transform.translate((-cx, -cy, 0))
+        transform.rotate(rot_deg, (0, 0, 1))
+        transform.translate((cx + tx, cy + ty, 0))
 
         return transform
 
