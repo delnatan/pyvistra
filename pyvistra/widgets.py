@@ -1526,7 +1526,8 @@ class AlignmentDialog(QDialog):
 
     def _build_overlay_transform(self):
         """Build transform for overlay layers."""
-        from vispy.scene.transforms import MatrixTransform, STTransform, ChainTransform
+        import math
+        from vispy.scene.transforms import MatrixTransform, STTransform
 
         if not self._query_window:
             return STTransform()
@@ -1535,7 +1536,7 @@ class AlignmentDialog(QDialog):
         _, _, _, Y, X = self._query_window.img_data.shape
         sy, sx = self._query_window.renderer.scale
 
-        # Image center
+        # Image center in scaled coordinates
         cx = X * sx / 2
         cy = Y * sy / 2
 
@@ -1543,18 +1544,26 @@ class AlignmentDialog(QDialog):
         tx = self.translate_x_spin.value()
         ty = self.translate_y_spin.value()
 
-        # Build transform: scale -> rotate around center -> translate
-        scale_tf = STTransform(scale=(sx, sy))
-
         if rot_deg == 0.0 and tx == 0.0 and ty == 0.0:
-            return scale_tf
+            return STTransform(scale=(sx, sy))
 
-        to_origin = STTransform(translate=(-cx, -cy))
-        rotation = MatrixTransform()
-        rotation.rotate(rot_deg, (0, 0, 1))
-        from_origin = STTransform(translate=(cx + tx, cy + ty))
+        # Build a single affine matrix for: scale -> rotate around center -> translate
+        theta = math.radians(rot_deg)
+        cos_t = math.cos(theta)
+        sin_t = math.sin(theta)
 
-        return ChainTransform([scale_tf, to_origin, rotation, from_origin])
+        # Translation component for rotation around center
+        tx_total = (1 - cos_t) * cx + sin_t * cy + tx
+        ty_total = (1 - cos_t) * cy - sin_t * cx + ty
+
+        transform = MatrixTransform()
+        transform.matrix = [
+            [sx * cos_t, sx * sin_t, 0, 0],
+            [-sy * sin_t, sy * cos_t, 0, 0],
+            [0, 0, 1, 0],
+            [tx_total, ty_total, 0, 1],
+        ]
+        return transform
 
     def _update_overlay_transform(self):
         """Update transform on existing overlay layers."""

@@ -314,6 +314,8 @@ class CompositeImageVisual:
 
     def _build_transform(self):
         """Build the combined transform: scale * rotation_around_center * translation."""
+        import math
+
         sy, sx = self.scale
         _, _, _, Y, X = self.data.shape
 
@@ -321,38 +323,36 @@ class CompositeImageVisual:
         cx = X * sx / 2
         cy = Y * sy / 2
 
-        # Build transform chain:
-        # 1. Scale (pixel scale for physical units)
-        # 2. Translate to origin (center image at origin)
-        # 3. Rotate
-        # 4. Translate back + user translation
-
-        scale_tf = STTransform(scale=(sx, sy))
-
+        # If no rotation/translation, just use simple scale
         if (
             self._rotation_deg == 0.0
             and self._translate_x == 0.0
             and self._translate_y == 0.0
         ):
-            # No rotation/translation, just use simple scale
-            return scale_tf
+            return STTransform(scale=(sx, sy))
 
-        # For rotation around center:
-        # final_pos = R @ (pos - center) + center + translation
-        # Which is: translate(-cx, -cy) -> rotate -> translate(cx + tx, cy + ty)
+        # Build a single affine matrix for: scale -> rotate around center -> translate
+        # This ensures rotation happens around the image center
+        theta = math.radians(self._rotation_deg)
+        cos_t = math.cos(theta)
+        sin_t = math.sin(theta)
 
-        to_origin = STTransform(translate=(-cx, -cy))
+        # Combined transform matrix (in 2D homogeneous coordinates, extended to 4x4)
+        # For point P: P' = R @ S @ P + (I - R) @ C + T
+        # Where S = scale, R = rotation, C = center, T = translation
 
-        rotation = MatrixTransform()
-        rotation.rotate(self._rotation_deg, (0, 0, 1))  # Rotate around Z axis
+        # Translation component for rotation around center
+        tx_total = (1 - cos_t) * cx + sin_t * cy + self._translate_x
+        ty_total = (1 - cos_t) * cy - sin_t * cx + self._translate_y
 
-        from_origin = STTransform(
-            translate=(cx + self._translate_x, cy + self._translate_y)
-        )
-
-        # Chain: scale first, then to_origin, then rotate, then from_origin
-        # VisPy ChainTransform applies transforms in order (first in list applied first)
-        return ChainTransform([scale_tf, to_origin, rotation, from_origin])
+        transform = MatrixTransform()
+        transform.matrix = [
+            [sx * cos_t, sx * sin_t, 0, 0],
+            [-sy * sin_t, sy * cos_t, 0, 0],
+            [0, 0, 1, 0],
+            [tx_total, ty_total, 0, 1],
+        ]
+        return transform
 
     def _apply_transform_to_layers(self):
         """Apply the current transform to all image layers."""
