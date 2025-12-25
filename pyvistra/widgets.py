@@ -1,19 +1,20 @@
 import numpy as np
-from qtpy.QtCore import Qt, Signal, QRectF
+from qtpy.QtCore import QRectF, Qt, Signal
 from qtpy.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QDoubleSpinBox,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSlider,
     QVBoxLayout,
     QWidget,
-    QSlider,
-    QDoubleSpinBox,
-    QGroupBox,
 )
+
 from pyvistra.visuals import COLORMAPS
 
 # Theme Constants
@@ -46,7 +47,7 @@ class HistogramWidget(QWidget):
         # State
         self.clim_min = 0.0
         self.clim_max = 1.0
-        
+
         # Interaction
         self._dragging = None  # 'min', 'max', 'center', or None
         self._last_mouse_x = 0
@@ -56,13 +57,15 @@ class HistogramWidget(QWidget):
         # We use a fixed number of bins for display
         self.data_min = float(np.nanmin(data_slice))
         self.data_max = float(np.nanmax(data_slice))
-        
+
         if self.data_max <= self.data_min:
             self.data_max = self.data_min + 1e-5
 
-        y, x = np.histogram(data_slice, bins=100, range=(self.data_min, self.data_max))
+        y, x = np.histogram(
+            data_slice, bins=100, range=(self.data_min, self.data_max)
+        )
         self.hist_data = np.log1p(y)
-        
+
         self.color = QColor(color_name)
         self.update()
 
@@ -74,7 +77,8 @@ class HistogramWidget(QWidget):
     def _val_to_x(self, val):
         w = self.width()
         span = self.data_max - self.data_min
-        if span <= 0: return 0
+        if span <= 0:
+            return 0
         ratio = (val - self.data_min) / span
         x = int(ratio * w)
         # Clamp to 32-bit signed integer range to prevent Qt OverflowError
@@ -98,8 +102,9 @@ class HistogramWidget(QWidget):
         # 1. Draw Histogram
         if self.hist_data is not None:
             max_log = np.max(self.hist_data)
-            if max_log == 0: max_log = 1
-            
+            if max_log == 0:
+                max_log = 1
+
             fill_color = QColor(self.color)
             fill_color.setAlpha(100)
             painter.setBrush(QBrush(fill_color))
@@ -126,7 +131,7 @@ class HistogramWidget(QWidget):
         pen = QPen(HANDLE_COLOR)
         pen.setWidth(2)
         painter.setPen(pen)
-        
+
         # Min Handle
         painter.drawLine(x_min, 0, x_min, h)
         # Max Handle
@@ -140,7 +145,7 @@ class HistogramWidget(QWidget):
         # Draw min/max values at handles
         min_str = f"{self.clim_min:.1f}"
         max_str = f"{self.clim_max:.1f}"
-        
+
         # Adjust text position to stay on screen
         fm = painter.fontMetrics()
         tw_min = fm.width(min_str)
@@ -148,11 +153,11 @@ class HistogramWidget(QWidget):
 
         draw_x_min = max(2, min(x_min - tw_min - 2, w - tw_min - 2))
         draw_x_max = min(w - tw_max - 2, max(x_max + 2, 2))
-        
+
         # If handles are close, push text apart
         if abs(x_max - x_min) < (tw_min + tw_max + 10):
-             draw_x_min = x_min - tw_min - 5
-             draw_x_max = x_max + 5
+            draw_x_min = x_min - tw_min - 5
+            draw_x_max = x_max + 5
 
         painter.drawText(int(draw_x_min), h - 5, min_str)
         painter.drawText(int(draw_x_max), h - 5, max_str)
@@ -161,31 +166,31 @@ class HistogramWidget(QWidget):
         x = event.x()
         x_min = self._val_to_x(self.clim_min)
         x_max = self._val_to_x(self.clim_max)
-        
+
         # Hit test
         dist_min = abs(x - x_min)
         dist_max = abs(x - x_max)
-        
+
         if dist_min < 10:
-            self._dragging = 'min'
+            self._dragging = "min"
         elif dist_max < 10:
-            self._dragging = 'max'
+            self._dragging = "max"
         elif x_min < x < x_max:
-            self._dragging = 'center'
+            self._dragging = "center"
         else:
             self._dragging = None
-            
+
         self._last_mouse_x = x
 
     def mouseMoveEvent(self, event):
         x = event.x()
-        
+
         # Cursor updates
         x_min = self._val_to_x(self.clim_min)
         x_max = self._val_to_x(self.clim_max)
         dist_min = abs(x - x_min)
         dist_max = abs(x - x_max)
-        
+
         if dist_min < 10 or dist_max < 10:
             self.setCursor(Qt.SizeHorCursor)
         elif x_min < x < x_max:
@@ -196,10 +201,10 @@ class HistogramWidget(QWidget):
         if self._dragging is None:
             return
 
-        if self._dragging == 'center':
+        if self._dragging == "center":
             self.setCursor(Qt.ClosedHandCursor)
             dx_pixels = x - self._last_mouse_x
-            
+
             # Convert pixel delta to value delta
             # We need to be careful because _x_to_val is absolute
             # Calculate span per pixel
@@ -208,24 +213,24 @@ class HistogramWidget(QWidget):
             if w > 0:
                 val_per_pixel = data_span / w
                 d_val = dx_pixels * val_per_pixel
-                
+
                 new_min = self.clim_min + d_val
                 new_max = self.clim_max + d_val
-                
+
                 # Clamp to data bounds
                 if new_min >= self.data_min and new_max <= self.data_max:
                     self.clim_min = new_min
                     self.clim_max = new_max
                     self.climChanged.emit(self.clim_min, self.clim_max)
                     self.update()
-            
+
         else:
             val = self._x_to_val(x)
-            if self._dragging == 'min':
+            if self._dragging == "min":
                 self.clim_min = min(val, self.clim_max - 1e-5)
-            elif self._dragging == 'max':
+            elif self._dragging == "max":
                 self.clim_max = max(val, self.clim_min + 1e-5)
-            
+
             self.climChanged.emit(self.clim_min, self.clim_max)
             self.update()
 
@@ -249,7 +254,7 @@ class ContrastDialog(QDialog):
         layout.setContentsMargins(15, 15, 15, 15)
 
         # 0. Window ID Label
-        if hasattr(viewer, 'window_id'):
+        if hasattr(viewer, "window_id"):
             wid_label = QLabel(f"<b>Window ID: {viewer.window_id}</b>")
             wid_label.setAlignment(Qt.AlignCenter)
             layout.addWidget(wid_label)
@@ -313,26 +318,26 @@ class ContrastDialog(QDialog):
         # 3. Gamma Control
         gamma_layout = QHBoxLayout()
         gamma_layout.addWidget(QLabel("Gamma:"))
-        
+
         self.gamma_slider = QSlider(Qt.Horizontal)
-        self.gamma_slider.setRange(1, 400) # 0.01 to 4.00
+        self.gamma_slider.setRange(1, 400)  # 0.01 to 4.00
         self.gamma_slider.setValue(100)
         self.gamma_slider.valueChanged.connect(self.on_gamma_slider_changed)
         gamma_layout.addWidget(self.gamma_slider)
-        
+
         self.gamma_spin = QDoubleSpinBox()
         self.gamma_spin.setRange(0.01, 4.0)
         self.gamma_spin.setSingleStep(0.1)
         self.gamma_spin.setValue(1.0)
         self.gamma_spin.valueChanged.connect(self.on_gamma_spin_changed)
         gamma_layout.addWidget(self.gamma_spin)
-        
+
         layout.addLayout(gamma_layout)
 
         # 4. Auto/Manual Contrast Buttons
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        
+
         self.btn_loosen = QPushButton("-")
         self.btn_loosen.setToolTip("Loosen Contrast (Expand Range)")
         self.btn_loosen.setFixedWidth(30)
@@ -492,18 +497,18 @@ class ContrastDialog(QDialog):
         Step size: 0.01%
         """
         step = 0.01
-        
-        if direction > 0: # Tighten
+
+        if direction > 0:  # Tighten
             self.pct_low += step
             self.pct_high -= step
-        else: # Loosen
+        else:  # Loosen
             self.pct_low -= step
             self.pct_high += step
-            
+
         # Clamp
         self.pct_low = max(0.0, min(self.pct_low, 49.0))
         self.pct_high = max(51.0, min(self.pct_high, 100.0))
-        
+
         self.apply_auto_contrast()
 
     def apply_auto_contrast(self):
@@ -519,7 +524,12 @@ class ContrastDialog(QDialog):
                 if valid_data.size == 0:
                     valid_data = plane  # Fallback if all zeros
 
-                mn, mx = map(float, np.nanpercentile(valid_data, (self.pct_low, self.pct_high)))
+                mn, mx = map(
+                    float,
+                    np.nanpercentile(
+                        valid_data, (self.pct_low, self.pct_high)
+                    ),
+                )
 
                 # Update Renderer
                 self.viewer.renderer.set_clim(ch_idx, mn, mx)
@@ -541,7 +551,10 @@ class ContrastDialog(QDialog):
             if valid_data.size == 0:
                 valid_data = plane  # Fallback if all zeros
 
-            mn, mx = map(float, np.nanpercentile(valid_data, (self.pct_low, self.pct_high)))
+            mn, mx = map(
+                float,
+                np.nanpercentile(valid_data, (self.pct_low, self.pct_high)),
+            )
 
             # Update Renderer
             self.viewer.renderer.set_clim(c_idx, mn, mx)
@@ -555,7 +568,14 @@ class ContrastDialog(QDialog):
             self.block_clim_signals(False)
 
 
-from qtpy.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, QScrollArea, QFrame, QSizePolicy
+from qtpy.QtWidgets import (
+    QFrame,
+    QHeaderView,
+    QScrollArea,
+    QSizePolicy,
+    QTableWidget,
+    QTableWidgetItem,
+)
 
 
 class CompactHistogramWidget(QWidget):
@@ -593,7 +613,9 @@ class CompactHistogramWidget(QWidget):
         if self.data_max <= self.data_min:
             self.data_max = self.data_min + 1e-5
 
-        y, x = np.histogram(data_slice, bins=100, range=(self.data_min, self.data_max))
+        y, x = np.histogram(
+            data_slice, bins=100, range=(self.data_min, self.data_max)
+        )
         self.hist_data = np.log1p(y)
 
         self.color = QColor(color_name)
@@ -672,11 +694,11 @@ class CompactHistogramWidget(QWidget):
         dist_max = abs(x - x_max)
 
         if dist_min < 10:
-            self._dragging = 'min'
+            self._dragging = "min"
         elif dist_max < 10:
-            self._dragging = 'max'
+            self._dragging = "max"
         elif x_min < x < x_max:
-            self._dragging = 'center'
+            self._dragging = "center"
         else:
             self._dragging = None
 
@@ -700,7 +722,7 @@ class CompactHistogramWidget(QWidget):
         if self._dragging is None:
             return
 
-        if self._dragging == 'center':
+        if self._dragging == "center":
             self.setCursor(Qt.ClosedHandCursor)
             dx_pixels = x - self._last_mouse_x
 
@@ -720,9 +742,9 @@ class CompactHistogramWidget(QWidget):
                     self.update()
         else:
             val = self._x_to_val(x)
-            if self._dragging == 'min':
+            if self._dragging == "min":
                 self.clim_min = min(val, self.clim_max - 1e-5)
-            elif self._dragging == 'max':
+            elif self._dragging == "max":
                 self.clim_max = max(val, self.clim_min + 1e-5)
 
             self.climChanged.emit(self.clim_min, self.clim_max)
@@ -871,13 +893,20 @@ class ChannelRow(QWidget):
     def _show_colormap_menu(self):
         """Show a popup menu for colormap selection."""
         from qtpy.QtWidgets import QMenu
+
         menu = QMenu(self)
 
         for cmap_name in COLORMAPS.keys():
             action = menu.addAction(cmap_name)
-            action.triggered.connect(lambda checked, name=cmap_name: self._on_colormap_selected(name))
+            action.triggered.connect(
+                lambda checked, name=cmap_name: self._on_colormap_selected(
+                    name
+                )
+            )
 
-        menu.exec_(self.color_btn.mapToGlobal(self.color_btn.rect().bottomLeft()))
+        menu.exec_(
+            self.color_btn.mapToGlobal(self.color_btn.rect().bottomLeft())
+        )
 
     def _on_colormap_selected(self, cmap_name):
         self.current_colormap = cmap_name
@@ -931,7 +960,7 @@ class ChannelPanel(QDialog):
         layout.setSpacing(4)
 
         # Window ID Label
-        if hasattr(viewer, 'window_id'):
+        if hasattr(viewer, "window_id"):
             wid_label = QLabel(f"<b>Window: {viewer.window_id}</b>")
             wid_label.setAlignment(Qt.AlignCenter)
             layout.addWidget(wid_label)
@@ -981,7 +1010,9 @@ class ChannelPanel(QDialog):
                 ch_name = f"Ch {c + 1}"
 
             # Get color from renderer
-            color = self.viewer.renderer.channel_colors[c % len(self.viewer.renderer.channel_colors)]
+            color = self.viewer.renderer.channel_colors[
+                c % len(self.viewer.renderer.channel_colors)
+            ]
 
             row = ChannelRow(c, ch_name, color)
             row.visibilityChanged.connect(self._on_visibility_changed)
@@ -1010,7 +1041,9 @@ class ChannelPanel(QDialog):
         self.viewer.canvas.update()
 
         # Update color swatch
-        color = self.viewer.renderer.channel_colors[channel_idx % len(self.viewer.renderer.channel_colors)]
+        color = self.viewer.renderer.channel_colors[
+            channel_idx % len(self.viewer.renderer.channel_colors)
+        ]
         self.channel_rows[channel_idx]._update_color_swatch(color)
 
         # Refresh histogram with new color
@@ -1049,7 +1082,9 @@ class ChannelPanel(QDialog):
         for c, row in enumerate(self.channel_rows):
             if c < cache.shape[0]:
                 plane = cache[c]
-                color = self.viewer.renderer.channel_colors[c % len(self.viewer.renderer.channel_colors)]
+                color = self.viewer.renderer.channel_colors[
+                    c % len(self.viewer.renderer.channel_colors)
+                ]
                 row.set_data(plane, color)
 
                 # Update clim
@@ -1070,36 +1105,570 @@ class MetadataDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Image Metadata")
         self.resize(400, 500)
-        
+
         layout = QVBoxLayout(self)
-        
+
         self.table = QTableWidget()
         self.table.setColumnCount(2)
         self.table.setHorizontalHeaderLabels(["Key", "Value"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.verticalHeader().setVisible(False)
-        
+
         layout.addWidget(self.table)
-        
+
         self.populate_table(metadata)
-        
+
     def populate_table(self, metadata):
         self.table.setRowCount(0)
         for key, value in metadata.items():
             row = self.table.rowCount()
             self.table.insertRow(row)
-            
+
             # Key
             k_item = QTableWidgetItem(str(key))
             k_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             self.table.setItem(row, 0, k_item)
-            
+
             # Value
             v_str = str(value)
             # If value is a long list/array, truncate it?
-            if isinstance(value, (list, tuple, np.ndarray)) and len(value) > 10:
+            if (
+                isinstance(value, (list, tuple, np.ndarray))
+                and len(value) > 10
+            ):
                 v_str = f"{type(value).__name__} shape={np.shape(value)}"
-                
+
             v_item = QTableWidgetItem(v_str)
             v_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             self.table.setItem(row, 1, v_item)
+
+
+class TransformDialog(QDialog):
+    """
+    Dialog for adjusting image rotation and translation.
+    Transforms the view without affecting ROIs.
+    """
+
+    def __init__(self, viewer, parent=None):
+        super().__init__(parent)
+        self.viewer = viewer
+        self.setWindowTitle("Transform Image")
+        self.setWindowFlags(Qt.Tool)
+        self.resize(320, 180)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(10)
+
+        # Window ID
+        if hasattr(viewer, "window_id"):
+            wid_label = QLabel(f"<b>Window: {viewer.window_id}</b>")
+            wid_label.setAlignment(Qt.AlignCenter)
+            layout.addWidget(wid_label)
+
+        # Rotation
+        rot_group = QGroupBox("Rotation")
+        rot_layout = QHBoxLayout(rot_group)
+
+        rot_layout.addWidget(QLabel("Angle:"))
+        self.rotation_spin = QDoubleSpinBox()
+        self.rotation_spin.setRange(-180.0, 180.0)
+        self.rotation_spin.setSingleStep(0.5)
+        self.rotation_spin.setDecimals(2)
+        self.rotation_spin.setSuffix("°")
+        self.rotation_spin.setValue(viewer.renderer.rotation_deg)
+        self.rotation_spin.valueChanged.connect(self._on_rotation_changed)
+        rot_layout.addWidget(self.rotation_spin)
+
+        self.rotation_slider = QSlider(Qt.Horizontal)
+        self.rotation_slider.setRange(
+            -1800, 1800
+        )  # -180.0 to 180.0 in 0.1 increments
+        self.rotation_slider.setValue(int(viewer.renderer.rotation_deg * 10))
+        self.rotation_slider.valueChanged.connect(
+            self._on_rotation_slider_changed
+        )
+        rot_layout.addWidget(self.rotation_slider)
+
+        layout.addWidget(rot_group)
+
+        # Translation
+        trans_group = QGroupBox("Translation")
+        trans_layout = QVBoxLayout(trans_group)
+
+        # X translation
+        x_row = QHBoxLayout()
+        x_row.addWidget(QLabel("X:"))
+        self.translate_x_spin = QDoubleSpinBox()
+        self.translate_x_spin.setRange(-10000.0, 10000.0)
+        self.translate_x_spin.setSingleStep(1.0)
+        self.translate_x_spin.setDecimals(1)
+        self.translate_x_spin.setSuffix(" px")
+        self.translate_x_spin.setValue(viewer.renderer.translate_x)
+        self.translate_x_spin.valueChanged.connect(
+            self._on_translate_x_changed
+        )
+        x_row.addWidget(self.translate_x_spin)
+        trans_layout.addLayout(x_row)
+
+        # Y translation
+        y_row = QHBoxLayout()
+        y_row.addWidget(QLabel("Y:"))
+        self.translate_y_spin = QDoubleSpinBox()
+        self.translate_y_spin.setRange(-10000.0, 10000.0)
+        self.translate_y_spin.setSingleStep(1.0)
+        self.translate_y_spin.setDecimals(1)
+        self.translate_y_spin.setSuffix(" px")
+        self.translate_y_spin.setValue(viewer.renderer.translate_y)
+        self.translate_y_spin.valueChanged.connect(
+            self._on_translate_y_changed
+        )
+        y_row.addWidget(self.translate_y_spin)
+        trans_layout.addLayout(y_row)
+
+        layout.addWidget(trans_group)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        reset_btn = QPushButton("Reset")
+        reset_btn.clicked.connect(self._reset_transform)
+        btn_layout.addWidget(reset_btn)
+
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.close)
+        btn_layout.addWidget(close_btn)
+
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+    def _on_rotation_changed(self, value):
+        self.rotation_slider.blockSignals(True)
+        self.rotation_slider.setValue(int(value * 10))
+        self.rotation_slider.blockSignals(False)
+        self.viewer.renderer.rotation_deg = value
+        self.viewer.canvas.update()
+
+    def _on_rotation_slider_changed(self, value):
+        rot_deg = value / 10.0
+        self.rotation_spin.blockSignals(True)
+        self.rotation_spin.setValue(rot_deg)
+        self.rotation_spin.blockSignals(False)
+        self.viewer.renderer.rotation_deg = rot_deg
+        self.viewer.canvas.update()
+
+    def _on_translate_x_changed(self, value):
+        self.viewer.renderer.translate_x = value
+        self.viewer.canvas.update()
+
+    def _on_translate_y_changed(self, value):
+        self.viewer.renderer.translate_y = value
+        self.viewer.canvas.update()
+
+    def _reset_transform(self):
+        self.viewer.renderer.reset_transform()
+        self.rotation_spin.blockSignals(True)
+        self.rotation_slider.blockSignals(True)
+        self.translate_x_spin.blockSignals(True)
+        self.translate_y_spin.blockSignals(True)
+
+        self.rotation_spin.setValue(0.0)
+        self.rotation_slider.setValue(0)
+        self.translate_x_spin.setValue(0.0)
+        self.translate_y_spin.setValue(0.0)
+
+        self.rotation_spin.blockSignals(False)
+        self.rotation_slider.blockSignals(False)
+        self.translate_x_spin.blockSignals(False)
+        self.translate_y_spin.blockSignals(False)
+
+        self.viewer.canvas.update()
+
+    def refresh_ui(self):
+        """Refresh UI to match current renderer state."""
+        self.rotation_spin.blockSignals(True)
+        self.rotation_slider.blockSignals(True)
+        self.translate_x_spin.blockSignals(True)
+        self.translate_y_spin.blockSignals(True)
+
+        self.rotation_spin.setValue(self.viewer.renderer.rotation_deg)
+        self.rotation_slider.setValue(
+            int(self.viewer.renderer.rotation_deg * 10)
+        )
+        self.translate_x_spin.setValue(self.viewer.renderer.translate_x)
+        self.translate_y_spin.setValue(self.viewer.renderer.translate_y)
+
+        self.rotation_spin.blockSignals(False)
+        self.rotation_slider.blockSignals(False)
+        self.translate_x_spin.blockSignals(False)
+        self.translate_y_spin.blockSignals(False)
+
+
+class AlignmentDialog(QDialog):
+    """
+    Dialog for aligning two images via overlay.
+    User selects a reference and query image, then adjusts rotation/translation
+    to align them. The query image is overlaid on the reference with adjustable opacity.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Align Images")
+        self.setWindowFlags(Qt.Tool)
+        self.resize(380, 320)
+
+        # Import manager here to avoid circular imports
+        from .manager import manager
+
+        self.manager = manager
+
+        self._overlay_layers = []  # Track overlay layers for cleanup
+        self._reference_window = None
+        self._query_window = None
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(10)
+
+        # Image Selection
+        select_group = QGroupBox("Image Selection")
+        select_layout = QVBoxLayout(select_group)
+
+        # Reference image
+        ref_row = QHBoxLayout()
+        ref_row.addWidget(QLabel("Reference:"))
+        self.ref_combo = QComboBox()
+        self.ref_combo.currentIndexChanged.connect(self._on_reference_changed)
+        ref_row.addWidget(self.ref_combo, 1)
+        select_layout.addLayout(ref_row)
+
+        # Query image
+        query_row = QHBoxLayout()
+        query_row.addWidget(QLabel("Query:"))
+        self.query_combo = QComboBox()
+        self.query_combo.currentIndexChanged.connect(self._on_query_changed)
+        query_row.addWidget(self.query_combo, 1)
+        select_layout.addLayout(query_row)
+
+        layout.addWidget(select_group)
+
+        # Transform Controls
+        transform_group = QGroupBox("Query Transform")
+        transform_layout = QVBoxLayout(transform_group)
+
+        # Rotation
+        rot_row = QHBoxLayout()
+        rot_row.addWidget(QLabel("Rotation:"))
+        self.rotation_spin = QDoubleSpinBox()
+        self.rotation_spin.setRange(-180.0, 180.0)
+        self.rotation_spin.setSingleStep(0.5)
+        self.rotation_spin.setDecimals(2)
+        self.rotation_spin.setSuffix("°")
+        self.rotation_spin.valueChanged.connect(self._on_transform_changed)
+        rot_row.addWidget(self.rotation_spin)
+
+        self.rotation_slider = QSlider(Qt.Horizontal)
+        self.rotation_slider.setRange(-1800, 1800)
+        self.rotation_slider.valueChanged.connect(
+            self._on_rotation_slider_changed
+        )
+        rot_row.addWidget(self.rotation_slider)
+        transform_layout.addLayout(rot_row)
+
+        # X translation
+        x_row = QHBoxLayout()
+        x_row.addWidget(QLabel("X Offset:"))
+        self.translate_x_spin = QDoubleSpinBox()
+        self.translate_x_spin.setRange(-10000.0, 10000.0)
+        self.translate_x_spin.setSingleStep(1.0)
+        self.translate_x_spin.setDecimals(1)
+        self.translate_x_spin.setSuffix(" px")
+        self.translate_x_spin.valueChanged.connect(self._on_transform_changed)
+        x_row.addWidget(self.translate_x_spin)
+        transform_layout.addLayout(x_row)
+
+        # Y translation
+        y_row = QHBoxLayout()
+        y_row.addWidget(QLabel("Y Offset:"))
+        self.translate_y_spin = QDoubleSpinBox()
+        self.translate_y_spin.setRange(-10000.0, 10000.0)
+        self.translate_y_spin.setSingleStep(1.0)
+        self.translate_y_spin.setDecimals(1)
+        self.translate_y_spin.setSuffix(" px")
+        self.translate_y_spin.valueChanged.connect(self._on_transform_changed)
+        y_row.addWidget(self.translate_y_spin)
+        transform_layout.addLayout(y_row)
+
+        layout.addWidget(transform_group)
+
+        # Opacity Control
+        opacity_group = QGroupBox("Overlay Opacity")
+        opacity_layout = QHBoxLayout(opacity_group)
+
+        self.opacity_slider = QSlider(Qt.Horizontal)
+        self.opacity_slider.setRange(0, 100)
+        self.opacity_slider.setValue(50)
+        self.opacity_slider.valueChanged.connect(self._on_opacity_changed)
+        opacity_layout.addWidget(self.opacity_slider)
+
+        self.opacity_label = QLabel("50%")
+        self.opacity_label.setFixedWidth(40)
+        opacity_layout.addWidget(self.opacity_label)
+
+        layout.addWidget(opacity_group)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        reset_btn = QPushButton("Reset")
+        reset_btn.clicked.connect(self._reset_transform)
+        btn_layout.addWidget(reset_btn)
+
+        apply_btn = QPushButton("Apply to Query")
+        apply_btn.setToolTip(
+            "Apply the current transform to the query window's view"
+        )
+        apply_btn.clicked.connect(self._apply_to_query)
+        btn_layout.addWidget(apply_btn)
+
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self._close_dialog)
+        btn_layout.addWidget(close_btn)
+
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+        # Populate dropdowns
+        self._refresh_window_list()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._refresh_window_list()
+
+    def closeEvent(self, event):
+        self._remove_overlay()
+        super().closeEvent(event)
+
+    def _close_dialog(self):
+        self._remove_overlay()
+        self.close()
+
+    def _refresh_window_list(self):
+        """Refresh the dropdown lists with current windows."""
+        self.ref_combo.blockSignals(True)
+        self.query_combo.blockSignals(True)
+
+        self.ref_combo.clear()
+        self.query_combo.clear()
+
+        self.ref_combo.addItem("-- Select Reference --", None)
+        self.query_combo.addItem("-- Select Query --", None)
+
+        for wid, window in self.manager.get_all().items():
+            title = window.windowTitle()
+            display_name = f"[{wid}] {title[:40]}"
+            self.ref_combo.addItem(display_name, wid)
+            self.query_combo.addItem(display_name, wid)
+
+        self.ref_combo.blockSignals(False)
+        self.query_combo.blockSignals(False)
+
+    def _on_reference_changed(self, index):
+        wid = self.ref_combo.currentData()
+        if wid is not None:
+            self._reference_window = self.manager.get(wid)
+        else:
+            self._reference_window = None
+        self._update_overlay()
+
+    def _on_query_changed(self, index):
+        wid = self.query_combo.currentData()
+        if wid is not None:
+            self._query_window = self.manager.get(wid)
+        else:
+            self._query_window = None
+        self._update_overlay()
+
+    def _on_rotation_slider_changed(self, value):
+        rot_deg = value / 10.0
+        self.rotation_spin.blockSignals(True)
+        self.rotation_spin.setValue(rot_deg)
+        self.rotation_spin.blockSignals(False)
+        self._update_overlay_transform()
+
+    def _on_transform_changed(self):
+        # Sync slider with spinbox
+        self.rotation_slider.blockSignals(True)
+        self.rotation_slider.setValue(int(self.rotation_spin.value() * 10))
+        self.rotation_slider.blockSignals(False)
+        self._update_overlay_transform()
+
+    def _on_opacity_changed(self, value):
+        self.opacity_label.setText(f"{value}%")
+        self._update_overlay_opacity()
+
+    def _remove_overlay(self):
+        """Remove any existing overlay layers."""
+        for layer in self._overlay_layers:
+            try:
+                layer.parent = None
+            except Exception:
+                pass
+        self._overlay_layers = []
+        if self._reference_window:
+            self._reference_window.canvas.update()
+
+    def _update_overlay(self):
+        """Create or update the overlay of query on reference."""
+        self._remove_overlay()
+
+        if not self._reference_window or not self._query_window:
+            return
+
+        if self._reference_window is self._query_window:
+            return  # Same window, no overlay needed
+
+        # Get query image data (current slice)
+        query_cache = self._query_window.renderer.current_slice_cache
+        if query_cache is None:
+            return
+
+        # Create overlay layers in reference window
+        from vispy import scene
+        from vispy.visuals.transforms.chain import ChainTransform
+        from vispy.visuals.transforms.linear import (
+            MatrixTransform,
+            STTransform,
+        )
+
+        opacity = self.opacity_slider.value() / 100.0
+
+        # Add each channel from query as an overlay
+        for c in range(query_cache.shape[0]):
+            plane = query_cache[c]
+
+            # Get colormap from query
+            cmap_name = self._query_window.renderer.get_colormap_name(c)
+            from pyvistra.visuals import get_colormap
+
+            cmap, _ = get_colormap(cmap_name)
+
+            # Create image visual
+            overlay = scene.visuals.Image(
+                plane,
+                cmap=cmap,
+                clim=self._query_window.renderer.get_clim(c),
+                parent=self._reference_window.view.scene,
+                method="auto",
+                interpolation="nearest",
+            )
+
+            # Set blending for overlay
+            overlay.set_gl_state(
+                preset="translucent",
+                blend=True,
+                blend_func=("src_alpha", "one_minus_src_alpha"),
+                depth_test=False,
+            )
+            overlay.opacity = opacity
+            overlay.order = 100 + c  # Render on top
+
+            # Apply transform
+            overlay.transform = self._build_overlay_transform()
+
+            self._overlay_layers.append(overlay)
+
+        self._reference_window.canvas.update()
+
+    def _build_overlay_transform(self):
+        """Build transform for overlay layers."""
+
+        from vispy.visuals.transforms.linear import (
+            MatrixTransform,
+            STTransform,
+        )
+
+        if not self._query_window:
+            return STTransform()
+
+        # Get query image dimensions
+        _, _, _, Y, X = self._query_window.img_data.shape
+        sy, sx = self._query_window.renderer.scale
+
+        # Image center in scaled coordinates
+        cx = X * sx / 2
+        cy = Y * sy / 2
+
+        rot_deg = self.rotation_spin.value()
+        tx = self.translate_x_spin.value()
+        ty = self.translate_y_spin.value()
+
+        if rot_deg == 0.0 and tx == 0.0 and ty == 0.0:
+            return STTransform(scale=(sx, sy))
+
+        # Build transform for rotation around image center:
+        # 1. Scale, 2. Translate center to origin, 3. Rotate, 4. Translate back + offset
+        transform = MatrixTransform()
+        transform.scale((sx, sy, 1))
+        transform.translate((-cx, -cy, 0))
+        transform.rotate(rot_deg, (0, 0, 1))
+        transform.translate((cx + tx, cy + ty, 0))
+
+        return transform
+
+    def _update_overlay_transform(self):
+        """Update transform on existing overlay layers."""
+        if not self._overlay_layers:
+            return
+
+        transform = self._build_overlay_transform()
+        for layer in self._overlay_layers:
+            layer.transform = transform
+
+        if self._reference_window:
+            self._reference_window.canvas.update()
+
+    def _update_overlay_opacity(self):
+        """Update opacity on existing overlay layers."""
+        opacity = self.opacity_slider.value() / 100.0
+        for layer in self._overlay_layers:
+            layer.opacity = opacity
+
+        if self._reference_window:
+            self._reference_window.canvas.update()
+
+    def _reset_transform(self):
+        """Reset transform controls to zero."""
+        self.rotation_spin.blockSignals(True)
+        self.rotation_slider.blockSignals(True)
+        self.translate_x_spin.blockSignals(True)
+        self.translate_y_spin.blockSignals(True)
+
+        self.rotation_spin.setValue(0.0)
+        self.rotation_slider.setValue(0)
+        self.translate_x_spin.setValue(0.0)
+        self.translate_y_spin.setValue(0.0)
+
+        self.rotation_spin.blockSignals(False)
+        self.rotation_slider.blockSignals(False)
+        self.translate_x_spin.blockSignals(False)
+        self.translate_y_spin.blockSignals(False)
+
+        self._update_overlay_transform()
+
+    def _apply_to_query(self):
+        """Apply the current transform settings to the query window's renderer."""
+        if not self._query_window:
+            return
+
+        self._query_window.renderer.set_transform(
+            rotation_deg=self.rotation_spin.value(),
+            translate_x=self.translate_x_spin.value(),
+            translate_y=self.translate_y_spin.value(),
+        )
+        self._query_window.canvas.update()
+
+        # Remove overlay since transform is now applied
+        self._remove_overlay()
