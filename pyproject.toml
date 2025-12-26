@@ -23,6 +23,8 @@ dependencies = [
     "superqt",
     "magicgui",
     "matplotlib",
+    "zarr>=3.0",
+    "scipy",
 ]
 
 [project.scripts]

@@ -425,6 +425,31 @@ class RectangleROI(ROI):
         if "p1" in self.data and "p2" in self.data:
             self.update(self.data["p1"], self.data["p2"])
 
+    def get_region(self, data):
+        """
+        Extract rectangular region from data.
+
+        Args:
+            data: Array with shape (..., Y, X)
+
+        Returns:
+            Cropped array with shape (..., height, width)
+        """
+        x1, y1 = self.data['p1']
+        x2, y2 = self.data['p2']
+
+        # Normalize to min/max
+        xmin, xmax = int(min(x1, x2)), int(max(x1, x2))
+        ymin, ymax = int(min(y1, y2)), int(max(y1, y2))
+
+        # Clamp to bounds
+        Y, X = data.shape[-2:]
+        xmin, xmax = max(0, xmin), min(X, xmax)
+        ymin, ymax = max(0, ymin), min(Y, ymax)
+
+        return data[..., ymin:ymax, xmin:xmax]
+
+
 class CircleROI(ROI):
     def __init__(self, view, name="Circle"):
         super().__init__(view, name)
@@ -531,6 +556,41 @@ class CircleROI(ROI):
         if "center" in self.data and "edge" in self.data:
             self.update(self.data["center"], self.data["edge"])
 
+    def get_region(self, data):
+        """
+        Extract circular region from data.
+
+        Args:
+            data: Array with shape (..., Y, X)
+
+        Returns:
+            tuple: (region, mask) where region is bounding box
+                   and mask is boolean array for circle
+        """
+        cx, cy = self.data['center']
+        ex, ey = self.data['edge']
+        radius = np.sqrt((ex - cx)**2 + (ey - cy)**2)
+
+        # Bounding box
+        xmin, xmax = int(cx - radius), int(cx + radius + 1)
+        ymin, ymax = int(cy - radius), int(cy + radius + 1)
+
+        # Clamp to bounds
+        Y, X = data.shape[-2:]
+        xmin, xmax = max(0, xmin), min(X, xmax)
+        ymin, ymax = max(0, ymin), min(Y, ymax)
+
+        region = data[..., ymin:ymax, xmin:xmax]
+
+        # Create circular mask
+        h, w = ymax - ymin, xmax - xmin
+        yy, xx = np.ogrid[:h, :w]
+        local_cx, local_cy = cx - xmin, cy - ymin
+        mask = ((xx - local_cx)**2 + (yy - local_cy)**2) <= radius**2
+
+        return region, mask
+
+
 class LineROI(ROI):
     def __init__(self, view, name="Line"):
         super().__init__(view, name)
@@ -614,15 +674,49 @@ class LineROI(ROI):
 
     def adjust(self, handle_id, new_pos):
         if "p1" not in self.data: return
-        
+
         p1 = self.data["p1"]
         p2 = self.data["p2"]
-        
+
         if handle_id == "p1":
             self.update(new_pos, p2)
         elif handle_id == "p2":
             self.update(p1, new_pos)
-        
+
     def _update_visuals_from_data(self):
         if "p1" in self.data and "p2" in self.data:
             self.update(self.data["p1"], self.data["p2"])
+
+    def get_profile(self, data, num_points=None):
+        """
+        Extract intensity profile along line.
+
+        Args:
+            data: Array with shape (..., Y, X)
+            num_points: Number of samples (default: line length)
+
+        Returns:
+            Array with shape (..., num_points)
+        """
+        from scipy.ndimage import map_coordinates
+
+        x1, y1 = self.data['p1']
+        x2, y2 = self.data['p2']
+
+        length = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+        if num_points is None:
+            num_points = max(2, int(np.ceil(length)))
+
+        xs = np.linspace(x1, x2, num_points)
+        ys = np.linspace(y1, y2, num_points)
+        coords = np.array([ys, xs])  # scipy uses (row, col) order
+
+        # Handle multi-dimensional data
+        if data.ndim == 2:
+            return map_coordinates(data, coords, order=1)
+        else:
+            # For (C, Y, X) or similar, extract per channel
+            result = []
+            for i in range(data.shape[0]):
+                result.append(map_coordinates(data[i], coords, order=1))
+            return np.stack(result)

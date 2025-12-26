@@ -134,3 +134,108 @@ viewer = imshow(data, dims="zyx")
 # Start the event loop (blocks until all windows are closed)
 run_app()
 ```
+
+### Working with ROIs
+
+ROIs (Regions of Interest) can be drawn interactively and used to extract data from images.
+
+#### Extracting Region Data
+
+Each ROI type has methods to extract the corresponding region from image data:
+
+```python
+# Get the current displayed slice from the viewer
+cache = viewer.renderer.current_slice_cache  # Shape: (C, Y, X)
+
+# Rectangle ROI - extract rectangular region
+rect_roi = viewer.rois[0]  # Assuming first ROI is a RectangleROI
+cropped = rect_roi.get_region(cache)  # Shape: (C, height, width)
+
+# Circle ROI - extract circular region with mask
+circle_roi = viewer.rois[1]  # Assuming second ROI is a CircleROI
+region, mask = circle_roi.get_region(cache)
+# region: bounding box array (C, height, width)
+# mask: boolean array (height, width) - True inside circle
+
+# Get mean intensity inside circle for each channel
+mean_per_channel = [region[c][mask].mean() for c in range(region.shape[0])]
+
+# Line ROI - extract intensity profile along line
+line_roi = viewer.rois[2]  # Assuming third ROI is a LineROI
+profile = line_roi.get_profile(cache)  # Shape: (C, num_points)
+```
+
+### Image Transforms
+
+You can apply rotation and translation to images. The Transform dialog (`Image > Transform...` or `Shift+T`) provides visual preview with GPU-accelerated rendering.
+
+#### Applying Transforms Permanently
+
+To bake the transform into the image data (WYSIWYG - what you see is what you get):
+
+1. Open the Transform dialog
+2. Adjust rotation and translation visually
+3. Click "Apply Transform" to permanently apply the transform to the data
+
+This creates a transformed copy in memory. After applying, ROI region extraction will match what you see on screen.
+
+#### Programmatic Transform
+
+```python
+from pyvistra.io import apply_transform, load_image
+
+# Load image
+data, meta = load_image('input.ims')
+
+# Apply 45-degree rotation and 10px translation
+buffer = apply_transform(
+    source=data,
+    rotation_deg=45.0,      # Positive = counter-clockwise
+    translate=(10.0, 5.0),  # (tx, ty) in pixels
+    metadata=meta,
+)
+
+# The buffer behaves like a numpy array
+print(buffer.shape)  # Same as input
+
+# Save to TIFF
+buffer.save_as('rotated_output.tif')
+
+# Or display in a new viewer
+from pyvistra.ui import imshow
+viewer = imshow(buffer, title="Rotated")
+```
+
+### ImageBuffer for Large Images
+
+For processing large images that don't fit in memory, use `ImageBuffer` which streams data to disk using Zarr:
+
+```python
+from pyvistra.io import ImageBuffer
+import numpy as np
+
+# Create a buffer for a large 5D dataset
+buffer = ImageBuffer(
+    shape=(10, 50, 3, 2048, 2048),  # (T, Z, C, Y, X)
+    dtype=np.uint16,
+    chunks=(1, 16, 3, 512, 512),   # Optional: custom chunk size
+)
+
+# Write data slice by slice (streaming)
+for t in range(10):
+    for z in range(50):
+        # Process/acquire your data
+        slice_data = np.random.randint(0, 65535, (3, 2048, 2048), dtype=np.uint16)
+        buffer[t, z, :, :, :] = slice_data
+
+# Read back (lazy loading)
+volume = buffer[0, :, 0, :, :]  # Get Z-stack for t=0, c=0
+
+# Export to TIFF when done
+buffer.save_as('large_output.tif')
+
+# Clean up (deletes temporary files)
+buffer.close()
+```
+
+Buffers are stored in `~/.pyvistra/buffers/` and automatically cleaned up when closed or garbage collected.
