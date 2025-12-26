@@ -747,12 +747,20 @@ class TileWidget(QFrame):
             self.info_label.setStyleSheet("color: #ff6666; font-size: 10px;")
 
     def unload(self):
-        """Release memory."""
+        """Release memory and close file handles."""
         if self.renderer is not None:
             # Clear visuals
             for layer in self.renderer.layers:
                 layer.parent = None
             self.renderer = None
+
+        # Close data if it has a close method (ImageBuffer, Imaris5DProxy)
+        if self.data is not None and hasattr(self.data, 'close'):
+            try:
+                self.data.close()
+            except Exception:
+                pass
+
         self.data = None
         self.meta = None
 
