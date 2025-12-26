@@ -1,343 +1,285 @@
-# Implementation Plan: ImageBuffer & Streaming Image Operations
+# Implementation Plan: ImageBuffer and ROI Region Extraction
 
 ## Overview
 
-This plan introduces an `ImageBuffer` system that enables:
-1. **Streaming writes** - Process large images slice-by-slice without loading into memory
-2. **Live preview** - View processing results in real-time
-3. **Composable processing** - Any numpy-compatible function can process data
-4. **Transform persistence** - Save rotated/translated images properly
+This plan introduces:
+1. **ImageBuffer** - Zarr 3-backed array for streaming writes
+2. **ROI region extraction** - `get_region()` methods on ROI classes
+3. **WYSIWYG transforms** - "Apply Transform" bakes rotation/translation into data
+
+## Design Principles
+
+- **Keep it simple** - No caching, no generic frameworks, no factory methods
+- **WYSIWYG** - What you see is what you get; ROI extraction matches display
+- **Explicit over magic** - User clicks "Apply" to commit transforms
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                          Data Flow Architecture                               │
-├──────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  Source Files              ImageBuffer (Zarr 3)              Export          │
-│  ┌─────────────┐          ┌─────────────────────┐         ┌─────────────┐   │
-│  │ .ims        │──────────│ ~/.pyvistra/        │─────────│ .ome.tif    │   │
-│  │ .tif        │  convert │   buffers/          │  save   │ .ims        │   │
-│  │ .png        │──────────│     <uuid>.zarr     │─────────│ .ome.zarr   │   │
-│  │ numpy array │          └──────────┬──────────┘         └─────────────┘   │
-│  └─────────────┘                     │                                       │
-│                                      │ Proxy interface                       │
-│                                      ▼                                       │
-│  ┌──────────────────────────────────────────────────────────────────────┐   │
-│  │                         ImageWindow                                   │   │
-│  │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐   │   │
-│  │  │ CompositeVisual │◄───│ current_slice   │◄───│ buffer[t,z,:,:,:]   │   │
-│  │  │ (GPU rendering) │    │ _cache          │    │                 │   │   │
-│  │  └─────────────────┘    └─────────────────┘    └─────────────────┘   │   │
-│  └──────────────────────────────────────────────────────────────────────┘   │
-│                                                                              │
-│  Processing Pipeline (any framework: numpy, scipy, pytorch, jax, mlx)        │
-│  ┌──────────────────────────────────────────────────────────────────────┐   │
-│  │  for t, z in source:                                                  │   │
-│  │      slice = source[t, z, :, :, :]     # Read from source             │   │
-│  │      result = process_fn(slice)         # Any array operation         │   │
-│  │      buffer.write_slice(t, z, result)   # Write to buffer             │   │
-│  │      yield progress                     # Live update                 │   │
-│  └──────────────────────────────────────────────────────────────────────┘   │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         WYSIWYG Workflow                                │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  1. Load Image              2. Preview Transform      3. Apply          │
+│  ┌─────────────┐           ┌─────────────┐          ┌─────────────┐    │
+│  │ source.ims  │  visual   │ GPU rotate  │  bake    │ ImageBuffer │    │
+│  │ (proxy)     │──────────►│ (instant)   │─────────►│ (Zarr)      │    │
+│  └─────────────┘  only     └─────────────┘  data    └──────┬──────┘    │
+│                                                            │           │
+│  4. Draw ROI                5. Extract Region              │           │
+│  ┌─────────────┐           ┌─────────────┐                │           │
+│  │ Rectangle   │───────────│ roi.get_    │◄───────────────┘           │
+│  │ on image    │  matches  │ region()    │  from buffer               │
+│  └─────────────┘  display  └─────────────┘  (transformed)             │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Key Design Decisions
+## Implementation
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Buffer format | Zarr 3 | Concurrent R/W, chunked, modern |
-| Buffer location | `~/.pyvistra/buffers/` | Avoids external drive issues |
-| Default chunks | `(1, 16, C, 512, 512)` | Configurable, good default |
-| Metadata | Preserve from source | Scientific reproducibility |
-| Cleanup | On ImageWindow close | Prevents disk bloat |
+### Step 1: Add zarr dependency
 
-## Implementation Steps
-
-### Phase 1: Core Infrastructure
-
-#### Step 1.1: Add zarr dependency
-- Update `pyproject.toml` to include `zarr>=3.0`
-
-#### Step 1.2: Create `ImageBuffer` class in `io.py`
-
+**File: `pyproject.toml`**
 ```python
-class ImageBuffer:
-    """
-    Zarr-backed buffer for streaming 5D image operations.
-
-    Implements the same slicing interface as Numpy5DProxy/Imaris5DProxy,
-    allowing seamless use with ImageWindow.
-    """
-
-    def __init__(
-        self,
-        shape: tuple,
-        dtype: np.dtype,
-        chunks: tuple = None,  # Default: (1, 16, C, 512, 512)
-        path: str = None,      # None = auto-generate in ~/.pyvistra/
-        metadata: dict = None,
-        compressor: str = 'zstd',
-    ):
-        """Create or open an ImageBuffer."""
-
-    # Proxy interface (matches Numpy5DProxy)
-    @property
-    def shape(self) -> tuple: ...
-    @property
-    def dtype(self) -> np.dtype: ...
-    @property
-    def ndim(self) -> int: ...
-
-    def __getitem__(self, key) -> np.ndarray:
-        """Read slices - same interface as other proxies."""
-
-    # Write interface
-    def write_slice(self, t: int, z: int, data: np.ndarray):
-        """Write a (C, Y, X) slice at position (t, z)."""
-
-    def write_region(self, region: tuple, data: np.ndarray):
-        """Write arbitrary region: buffer[region] = data."""
-
-    # Factory methods
-    @classmethod
-    def from_proxy(cls, proxy, metadata=None, progress_cb=None) -> 'ImageBuffer':
-        """Create buffer by copying from existing proxy (lazy load)."""
-
-    @classmethod
-    def from_file(cls, filepath: str) -> 'ImageBuffer':
-        """Open existing buffer file."""
-
-    @classmethod
-    def empty_like(cls, proxy, metadata=None) -> 'ImageBuffer':
-        """Create empty buffer with same shape/dtype as proxy."""
-
-    # Export
-    def save_as(self, filepath: str, format: str = 'ome-tiff'):
-        """Export buffer to final format."""
-
-    # Lifecycle
-    def flush(self):
-        """Force write pending chunks to disk."""
-
-    def close(self):
-        """Close buffer and optionally delete temp file."""
-
-    def delete(self):
-        """Delete buffer file from disk."""
+dependencies = [
+    # ... existing ...
+    "zarr>=3.0",
+]
 ```
 
-#### Step 1.3: Buffer directory management
+### Step 2: ImageBuffer class
+
+**File: `io.py`**
 
 ```python
-# In io.py
+import zarr
+from pathlib import Path
+import uuid
+
 BUFFER_DIR = Path.home() / '.pyvistra' / 'buffers'
 
-def get_buffer_dir() -> Path:
-    """Ensure buffer directory exists and return path."""
-    BUFFER_DIR.mkdir(parents=True, exist_ok=True)
-    return BUFFER_DIR
 
-def cleanup_old_buffers(max_age_hours: int = 24):
-    """Remove buffer files older than max_age_hours."""
-```
+class ImageBuffer:
+    """
+    Zarr-backed 5D array buffer for streaming image operations.
 
-### Phase 2: ImageWindow Integration
+    Same interface as Numpy5DProxy for reading, plus write support.
+    """
 
-#### Step 2.1: Dual-mode data handling
+    def __init__(self, shape, dtype, chunks=None, metadata=None):
+        """
+        Create a new buffer.
 
-ImageWindow should work with both:
-- **Direct proxies** (current behavior, read-only)
-- **ImageBuffer** (new, read-write)
+        Args:
+            shape: 5D shape (T, Z, C, Y, X)
+            dtype: numpy dtype
+            chunks: Chunk shape, default (1, 16, C, 512, 512)
+            metadata: Optional dict to preserve
+        """
+        BUFFER_DIR.mkdir(parents=True, exist_ok=True)
+        self._path = BUFFER_DIR / f"{uuid.uuid4()}.zarr"
 
-```python
-class ImageWindow:
-    def __init__(self, data_or_path, title="Image"):
-        # ... existing code ...
+        T, Z, C, Y, X = shape
+        if chunks is None:
+            chunks = (1, min(16, Z), C, min(512, Y), min(512, X))
 
-        # New: track if we have a buffer
-        self._buffer = None  # ImageBuffer or None
+        self._store = zarr.open(
+            str(self._path),
+            mode='w',
+            shape=shape,
+            dtype=dtype,
+            chunks=chunks,
+        )
 
-        # Load data (unchanged)
-        if isinstance(data_or_path, str):
-            self.img_data, self.meta = load_image(filepath)
-        elif isinstance(data_or_path, ImageBuffer):
-            self._buffer = data_or_path
-            self.img_data = data_or_path  # Buffer IS the proxy
-            self.meta = data_or_path.metadata
-        else:
-            self.img_data = normalize_to_5d(data_or_path)
+        self.metadata = metadata or {}
+        self.ndim = 5
 
     @property
-    def buffer(self) -> Optional[ImageBuffer]:
-        """Return buffer if window is using one, else None."""
-        return self._buffer
+    def shape(self):
+        return self._store.shape
 
-    def ensure_buffer(self) -> ImageBuffer:
-        """Convert current data to buffer if not already buffered."""
-        if self._buffer is None:
-            self._buffer = ImageBuffer.from_proxy(self.img_data, self.meta)
-            self.img_data = self._buffer
-            self.renderer.data = self._buffer
-        return self._buffer
+    @property
+    def dtype(self):
+        return self._store.dtype
+
+    def __getitem__(self, key):
+        """Read slices - same interface as proxies."""
+        return self._store[key]
+
+    def __setitem__(self, key, value):
+        """Write slices."""
+        self._store[key] = value
+
+    def save_as(self, filepath):
+        """Export buffer to OME-TIFF."""
+        from .io import save_tiff
+        scale = self.metadata.get('scale', (1.0, 1.0, 1.0))
+        save_tiff(filepath, self._store[:], scale=scale)
+
+    def close(self):
+        """Close and delete the temporary buffer file."""
+        import shutil
+        if self._path.exists():
+            shutil.rmtree(self._path)
+
+    def __del__(self):
+        """Cleanup on garbage collection."""
+        try:
+            self.close()
+        except Exception:
+            pass
 ```
 
-#### Step 2.2: Transform saving with rotation
+### Step 3: Transform application
 
-Add menu action to save transformed image:
-
-```python
-# In ImageWindow._setup_menu()
-save_transformed_action = QAction("Save Transformed...", self)
-save_transformed_action.triggered.connect(self.save_transformed)
-image_menu.addAction(save_transformed_action)
-
-def save_transformed(self):
-    """Save current image with rotation/translation applied."""
-    filepath, _ = QFileDialog.getSaveFileName(
-        self, "Save Transformed Image", "",
-        "OME-TIFF (*.ome.tif);;TIFF (*.tif)"
-    )
-    if not filepath:
-        return
-
-    # Get current transform
-    rotation = self.renderer._rotation_deg
-    tx, ty = self.renderer._translate_x, self.renderer._translate_y
-
-    # Create output buffer
-    output = ImageBuffer.empty_like(self.img_data, self.meta)
-
-    # Apply transform slice-by-slice with progress
-    apply_transform_to_buffer(
-        source=self.img_data,
-        output=output,
-        rotation_deg=rotation,
-        translate=(tx, ty),
-        progress_cb=self._update_progress,
-    )
-
-    # Export
-    output.save_as(filepath)
-    output.delete()  # Clean up temp buffer
-```
-
-### Phase 3: Processing Pipeline
-
-#### Step 3.1: Generic processing function
+**File: `io.py`** (add function)
 
 ```python
-# In io.py or new processing.py
-
-def process_image(
-    source,           # Any proxy-like object
-    process_fn,       # Callable[[np.ndarray], np.ndarray]
-    output=None,      # ImageBuffer or None (auto-create)
-    slice_dims='tz',  # Which dims to iterate: 'tz', 't', 'z', 'tzc'
-    progress_cb=None, # Callable[[float], None]
-) -> ImageBuffer:
+def apply_transform(source, rotation_deg, translate, progress_cb=None):
     """
-    Apply process_fn to each slice of source, writing to output buffer.
+    Apply 2D rotation and translation to create a new buffer.
 
-    Example:
-        from scipy.ndimage import gaussian_filter
+    Args:
+        source: Source proxy (any 5D array-like)
+        rotation_deg: Rotation angle in degrees
+        translate: (tx, ty) translation in pixels
+        progress_cb: Optional callback(progress_fraction)
 
-        smoothed = process_image(
-            source=window.img_data,
-            process_fn=lambda s: gaussian_filter(s, sigma=2),
-        )
-        new_window = ImageWindow(smoothed)
-    """
-```
-
-#### Step 3.2: Transform-specific helper
-
-```python
-def apply_transform_to_buffer(
-    source,
-    output: ImageBuffer,
-    rotation_deg: float = 0,
-    translate: tuple = (0, 0),
-    interpolation_order: int = 1,  # 1=bilinear, 3=bicubic
-    progress_cb=None,
-):
-    """
-    Apply 2D rotation and translation to each T/Z slice.
-
-    Uses scipy.ndimage.affine_transform for proper interpolation.
+    Returns:
+        ImageBuffer with transformed data
     """
     from scipy.ndimage import affine_transform
+    import numpy as np
 
     T, Z, C, Y, X = source.shape
-    total = T * Z
 
-    # Build transform matrix
-    # Rotation around image center + translation
+    # Create output buffer
+    buffer = ImageBuffer(
+        shape=source.shape,
+        dtype=source.dtype,
+        metadata=getattr(source, 'metadata', {}),
+    )
+
+    # Build affine transform matrix (rotation around center + translation)
     cx, cy = X / 2, Y / 2
     theta = np.radians(rotation_deg)
     cos_t, sin_t = np.cos(theta), np.sin(theta)
     tx, ty = translate
 
-    # Affine matrix for scipy (inverse mapping)
-    matrix = np.array([
-        [cos_t, sin_t],
-        [-sin_t, cos_t]
-    ])
+    # Inverse mapping matrix for scipy
+    matrix = np.array([[cos_t, sin_t], [-sin_t, cos_t]])
     offset = np.array([
         cy - cos_t * cy - sin_t * cx - ty,
         cx + sin_t * cy - cos_t * cx - tx
     ])
 
+    total = T * Z
     for t in range(T):
         for z in range(Z):
             slice_data = source[t, z, :, :, :]  # (C, Y, X)
 
             # Transform each channel
             transformed = np.stack([
-                affine_transform(
-                    slice_data[c], matrix, offset,
-                    order=interpolation_order,
-                    mode='constant', cval=0
-                )
+                affine_transform(slice_data[c], matrix, offset, order=1)
                 for c in range(C)
             ])
 
-            output.write_slice(t, z, transformed)
+            buffer[t, z, :, :, :] = transformed
 
             if progress_cb:
                 progress_cb((t * Z + z + 1) / total)
+
+    return buffer
 ```
 
-### Phase 4: ROI Region Extraction
+### Step 4: Update TransformDialog
 
-With the buffer system in place, ROI region extraction becomes straightforward:
+**File: `widgets.py`** (modify TransformDialog)
 
-#### Step 4.1: Add `get_region` to ROI classes
+Add an "Apply" button that bakes the transform:
 
 ```python
-# In rois.py
+class TransformDialog(QDialog):
+    def __init__(self, image_window, parent=None):
+        # ... existing setup ...
 
+        # Add Apply button
+        self.apply_btn = QPushButton("Apply Transform")
+        self.apply_btn.clicked.connect(self.apply_transform)
+        self.layout.addWidget(self.apply_btn)
+
+    def apply_transform(self):
+        """Bake current rotation/translation into image data."""
+        from .io import apply_transform
+
+        rotation = self.rotation_slider.value()
+        tx = self.translate_x.value()
+        ty = self.translate_y.value()
+
+        # Skip if no transform
+        if rotation == 0 and tx == 0 and ty == 0:
+            return
+
+        # Show progress (optional: could add progress dialog)
+        self.apply_btn.setEnabled(False)
+        self.apply_btn.setText("Applying...")
+        QApplication.processEvents()
+
+        try:
+            # Create transformed buffer
+            buffer = apply_transform(
+                self.window.img_data,
+                rotation,
+                (tx, ty),
+            )
+            buffer.metadata = self.window.meta.copy()
+
+            # Switch window to use buffer
+            self.window.img_data = buffer
+            self.window.renderer.data = buffer
+            self.window.meta = buffer.metadata
+
+            # Reset visual transform (data is now transformed)
+            self.window.renderer.set_rotation(0)
+            self.window.renderer.set_translation(0, 0)
+            self.rotation_slider.setValue(0)
+            self.translate_x.setValue(0)
+            self.translate_y.setValue(0)
+
+            # Refresh display
+            self.window.update_view()
+
+        finally:
+            self.apply_btn.setEnabled(True)
+            self.apply_btn.setText("Apply Transform")
+```
+
+### Step 5: ROI region extraction
+
+**File: `rois.py`** (add methods to ROI classes)
+
+```python
 class RectangleROI(ROI):
-    def get_region(self, data: np.ndarray) -> np.ndarray:
+    # ... existing code ...
+
+    def get_region(self, data):
         """
-        Extract region from data array.
+        Extract rectangular region from data.
 
         Args:
-            data: Array with shape (..., Y, X) - typically (C, Y, X)
+            data: Array with shape (..., Y, X)
 
         Returns:
-            Cropped region with shape (..., height, width)
+            Cropped array with shape (..., height, width)
         """
         x1, y1 = self.data['p1']
         x2, y2 = self.data['p2']
 
-        # Normalize coordinates
+        # Normalize to min/max
         xmin, xmax = int(min(x1, x2)), int(max(x1, x2))
         ymin, ymax = int(min(y1, y2)), int(max(y1, y2))
 
-        # Clamp to data bounds
+        # Clamp to bounds
         Y, X = data.shape[-2:]
         xmin, xmax = max(0, xmin), min(X, xmax)
         ymin, ymax = max(0, ymin), min(Y, ymax)
@@ -346,22 +288,30 @@ class RectangleROI(ROI):
 
 
 class CircleROI(ROI):
-    def get_region(self, data: np.ndarray) -> tuple:
+    # ... existing code ...
+
+    def get_region(self, data):
         """
         Extract circular region from data.
 
+        Args:
+            data: Array with shape (..., Y, X)
+
         Returns:
-            (region, mask): Region is bounding box, mask is boolean circle
+            tuple: (region, mask) where region is bounding box
+                   and mask is boolean array for circle
         """
+        import numpy as np
+
         cx, cy = self.data['center']
         ex, ey = self.data['edge']
         radius = np.sqrt((ex - cx)**2 + (ey - cy)**2)
 
         # Bounding box
-        xmin, xmax = int(cx - radius), int(cx + radius)
-        ymin, ymax = int(cy - radius), int(cy + radius)
+        xmin, xmax = int(cx - radius), int(cx + radius + 1)
+        ymin, ymax = int(cy - radius), int(cy + radius + 1)
 
-        # Clamp
+        # Clamp to bounds
         Y, X = data.shape[-2:]
         xmin, xmax = max(0, xmin), min(X, xmax)
         ymin, ymax = max(0, ymin), min(Y, ymax)
@@ -369,25 +319,29 @@ class CircleROI(ROI):
         region = data[..., ymin:ymax, xmin:xmax]
 
         # Create circular mask
-        h, w = region.shape[-2:]
+        h, w = ymax - ymin, xmax - xmin
         yy, xx = np.ogrid[:h, :w]
-        mask = ((xx - (cx - xmin))**2 + (yy - (cy - ymin))**2) <= radius**2
+        local_cx, local_cy = cx - xmin, cy - ymin
+        mask = ((xx - local_cx)**2 + (yy - local_cy)**2) <= radius**2
 
         return region, mask
 
 
 class LineROI(ROI):
-    def get_profile(self, data: np.ndarray, num_points: int = None) -> np.ndarray:
+    # ... existing code ...
+
+    def get_profile(self, data, num_points=None):
         """
         Extract intensity profile along line.
 
         Args:
             data: Array with shape (..., Y, X)
-            num_points: Number of sample points (default: line length)
+            num_points: Number of samples (default: line length)
 
         Returns:
-            Profile with shape (..., num_points)
+            Array with shape (..., num_points)
         """
+        import numpy as np
         from scipy.ndimage import map_coordinates
 
         x1, y1 = self.data['p1']
@@ -395,85 +349,66 @@ class LineROI(ROI):
 
         length = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
         if num_points is None:
-            num_points = int(np.ceil(length))
+            num_points = max(2, int(np.ceil(length)))
 
-        # Sample coordinates along line
         xs = np.linspace(x1, x2, num_points)
         ys = np.linspace(y1, y2, num_points)
+        coords = np.array([ys, xs])  # scipy uses (row, col) order
 
-        # Extract profile for each leading dimension
-        coords = np.array([ys, xs])  # scipy uses (y, x) order
-
+        # Handle multi-dimensional data
         if data.ndim == 2:
             return map_coordinates(data, coords, order=1)
         else:
-            # Handle (C, Y, X) or similar
-            profiles = []
+            # For (C, Y, X) or similar, extract per channel
+            result = []
             for i in range(data.shape[0]):
-                profiles.append(map_coordinates(data[i], coords, order=1))
-            return np.stack(profiles)
-```
-
-#### Step 4.2: Convenience method on ImageWindow
-
-```python
-class ImageWindow:
-    def get_roi_data(self, roi, source='cache'):
-        """
-        Get data for an ROI.
-
-        Args:
-            roi: ROI instance
-            source: 'cache' (current slice), 'full' (all T/Z), or specific indices
-
-        Returns:
-            Data array or (data, mask) for CircleROI
-        """
-        if source == 'cache':
-            data = self.renderer.current_slice_cache  # (C, Y, X)
-        elif source == 'full':
-            data = self.img_data[:]  # Load full array
-        else:
-            data = self.img_data[source]  # Custom slicing
-
-        if isinstance(roi, LineROI):
-            return roi.get_profile(data)
-        else:
-            return roi.get_region(data)
+                result.append(map_coordinates(data[i], coords, order=1))
+            return np.stack(result)
 ```
 
 ## File Changes Summary
 
-| File | Changes |
-|------|---------|
-| `pyproject.toml` | Add `zarr>=3.0` dependency |
-| `io.py` | Add `ImageBuffer` class, buffer management functions |
-| `ui.py` | Add buffer support to `ImageWindow`, save transformed menu |
-| `rois.py` | Add `get_region()`/`get_profile()` to ROI classes |
-| `widgets.py` | Add progress dialog for long operations (optional) |
+| File | Change |
+|------|--------|
+| `pyproject.toml` | Add `zarr>=3.0` |
+| `io.py` | Add `ImageBuffer` class, `apply_transform()` function |
+| `widgets.py` | Add "Apply Transform" button to `TransformDialog` |
+| `rois.py` | Add `get_region()` to Rectangle/Circle, `get_profile()` to Line |
 
-## Testing Strategy
+## Usage Examples
 
-1. **Unit tests for ImageBuffer**
-   - Create, write, read, export
-   - Verify chunk handling
-   - Test cleanup
+### Transform and crop workflow
+```python
+# 1. Open image, rotate to align features
+window = ImageWindow("sample.ims")
+window.show()
 
-2. **Integration tests**
-   - Load large .ims file, convert to buffer
-   - Apply rotation, save
-   - Verify output matches expected
+# 2. User adjusts rotation in Transform dialog, clicks "Apply"
+#    (transforms data, resets visual rotation)
 
-3. **ROI extraction tests**
-   - Rectangle, Circle, Line profiles
-   - Edge cases (ROI at image boundary)
+# 3. Draw rectangle ROI on aligned image
 
-## Open Questions
+# 4. Extract region (matches what user sees)
+roi = window.rois[0]
+cache = window.renderer.current_slice_cache  # (C, Y, X)
+cropped = roi.get_region(cache)
+```
 
-1. **Buffer caching policy**: Should we cache converted buffers across sessions?
-2. **Undo support**: Should transforms be reversible via buffer history?
-3. **Multi-window buffers**: Can multiple windows share a buffer for comparison?
+### Circle ROI with mask
+```python
+roi = window.rois[0]  # CircleROI
+region, mask = roi.get_region(cache)
+
+# Get mean intensity inside circle
+mean_per_channel = [region[c][mask].mean() for c in range(region.shape[0])]
+```
+
+### Line profile
+```python
+roi = window.rois[0]  # LineROI
+profile = roi.get_profile(cache)  # shape (C, num_points)
+```
 
 ---
 
-*Ready for implementation after approval.*
+*Ready for implementation.*
