@@ -289,10 +289,14 @@ def apply_transform(source, rotation_deg, translate, metadata=None, progress_cb=
     """
     Apply 2D rotation and translation to create a new buffer.
 
+    Matches vispy's transform convention:
+    - Rotation is CCW for positive angles
+    - Translation is applied after rotation (in output space)
+
     Args:
         source: Source proxy (any 5D array-like with shape attribute)
-        rotation_deg: Rotation angle in degrees
-        translate: (tx, ty) translation in pixels
+        rotation_deg: Rotation angle in degrees (positive = CCW)
+        translate: (tx, ty) translation in pixels (applied after rotation)
         metadata: Optional metadata dict to attach to buffer
         progress_cb: Optional callback(progress_fraction)
 
@@ -311,33 +315,43 @@ def apply_transform(source, rotation_deg, translate, metadata=None, progress_cb=
     )
 
     # Build affine transform matrix (rotation around center + translation)
+    # scipy uses inverse mapping: output[o] = input[matrix @ o + offset]
     cx, cy = X / 2, Y / 2
     theta = np.radians(rotation_deg)
     cos_t, sin_t = np.cos(theta), np.sin(theta)
     tx, ty = translate
 
-    # Inverse mapping matrix for scipy
-    matrix = np.array([[cos_t, sin_t], [-sin_t, cos_t]])
-    offset = np.array([
-        cy - cos_t * cy - sin_t * cx - ty,
-        cx + sin_t * cy - cos_t * cx - tx
+    # 3D matrix: identity on batch dimension (Z*C), rotation on Y-X
+    # This allows transforming all Z and C slices in one call
+    matrix_3d = np.array([
+        [1, 0, 0],
+        [0, cos_t, sin_t],
+        [0, -sin_t, cos_t]
     ])
 
-    total = T * Z
+    # Offset for rotation around center with translation applied after rotation
+    # Translation in output space means we subtract it before inverse-rotating
+    offset_3d = np.array([
+        0,  # batch dimension unchanged
+        cy * (1 - cos_t) - sin_t * cx - cos_t * ty - sin_t * tx,
+        cx * (1 - cos_t) + sin_t * cy + sin_t * ty - cos_t * tx
+    ])
+
     for t in range(T):
-        for z in range(Z):
-            slice_data = source[t, z, :, :, :]  # (C, Y, X)
+        # Load full volume for this timepoint: (Z, C, Y, X)
+        volume = source[t, :, :, :, :]
 
-            # Transform each channel
-            transformed = np.stack([
-                affine_transform(slice_data[c], matrix, offset, order=1)
-                for c in range(C)
-            ])
+        # Reshape to (Z*C, Y, X) for batch processing
+        batch = volume.reshape(Z * C, Y, X)
 
-            buffer[t, z, :, :, :] = transformed
+        # Apply 3D affine transform (identity on batch dim, rotation on Y-X)
+        transformed = affine_transform(batch, matrix_3d, offset_3d, order=1)
 
-            if progress_cb:
-                progress_cb((t * Z + z + 1) / total)
+        # Reshape back to (Z, C, Y, X) and write
+        buffer[t, :, :, :, :] = transformed.reshape(Z, C, Y, X)
+
+        if progress_cb:
+            progress_cb((t + 1) / T)
 
     return buffer
 
