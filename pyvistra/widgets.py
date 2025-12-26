@@ -1565,6 +1565,9 @@ class AlignmentDialog(QDialog):
                 interpolation="nearest",
             )
 
+            # Inherit gamma from query window's contrast settings
+            overlay.gamma = self._query_window.renderer.get_gamma(c)
+
             # Set blending for overlay
             overlay.set_gl_state(
                 preset="translucent",
