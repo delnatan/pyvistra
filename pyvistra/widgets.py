@@ -1236,6 +1236,10 @@ class TransformDialog(QDialog):
         reset_btn.clicked.connect(self._reset_transform)
         btn_layout.addWidget(reset_btn)
 
+        self.apply_btn = QPushButton("Apply Transform")
+        self.apply_btn.clicked.connect(self._apply_transform)
+        btn_layout.addWidget(self.apply_btn)
+
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.close)
         btn_layout.addWidget(close_btn)
@@ -1284,6 +1288,63 @@ class TransformDialog(QDialog):
         self.translate_y_spin.blockSignals(False)
 
         self.viewer.canvas.update()
+
+    def _apply_transform(self):
+        """Bake current rotation/translation into image data."""
+        from .io import apply_transform
+
+        rotation = self.rotation_spin.value()
+        tx = self.translate_x_spin.value()
+        ty = self.translate_y_spin.value()
+
+        # Skip if no transform applied
+        if rotation == 0 and tx == 0 and ty == 0:
+            return
+
+        # Disable button and show progress
+        self.apply_btn.setEnabled(False)
+        self.apply_btn.setText("Applying...")
+        QApplication.processEvents()
+
+        try:
+            # Create transformed buffer
+            buffer = apply_transform(
+                self.viewer.img_data,
+                rotation,
+                (tx, ty),
+                metadata=self.viewer.meta.copy(),
+            )
+
+            # Switch viewer to use buffer
+            self.viewer.img_data = buffer
+            self.viewer.renderer.data = buffer
+            self.viewer.meta = buffer.metadata
+
+            # Reset visual transform (data is now transformed)
+            self.viewer.renderer.reset_transform()
+
+            # Reset UI controls
+            self.rotation_spin.blockSignals(True)
+            self.rotation_slider.blockSignals(True)
+            self.translate_x_spin.blockSignals(True)
+            self.translate_y_spin.blockSignals(True)
+
+            self.rotation_spin.setValue(0.0)
+            self.rotation_slider.setValue(0)
+            self.translate_x_spin.setValue(0.0)
+            self.translate_y_spin.setValue(0.0)
+
+            self.rotation_spin.blockSignals(False)
+            self.rotation_slider.blockSignals(False)
+            self.translate_x_spin.blockSignals(False)
+            self.translate_y_spin.blockSignals(False)
+
+            # Refresh display
+            self.viewer.update_view()
+
+        finally:
+            self.apply_btn.setEnabled(True)
+            self.apply_btn.setText("Apply Transform")
 
     def refresh_ui(self):
         """Refresh UI to match current renderer state."""

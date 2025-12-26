@@ -1,9 +1,16 @@
 import os
+import shutil
+import uuid
+from pathlib import Path
 
 import numpy as np
 import tifffile
+import zarr
 
 from .imaris_reader import ImarisReader
+
+# Buffer directory for temporary Zarr files
+BUFFER_DIR = Path.home() / '.pyvistra' / 'buffers'
 
 
 def is_rgb_image(arr):
@@ -206,6 +213,133 @@ class Numpy5DProxy:
 
         # Standard slicing
         return self.array[key]
+
+
+class ImageBuffer:
+    """
+    Zarr-backed 5D array buffer for streaming image operations.
+
+    Same interface as Numpy5DProxy for reading, plus write support.
+    Temporary files are stored in ~/.pyvistra/buffers/ and cleaned up on close.
+    """
+
+    def __init__(self, shape, dtype, chunks=None, metadata=None):
+        """
+        Create a new buffer.
+
+        Args:
+            shape: 5D shape (T, Z, C, Y, X)
+            dtype: numpy dtype
+            chunks: Chunk shape, default (1, 16, C, 512, 512)
+            metadata: Optional dict to preserve
+        """
+        BUFFER_DIR.mkdir(parents=True, exist_ok=True)
+        self._path = BUFFER_DIR / f"{uuid.uuid4()}.zarr"
+
+        T, Z, C, Y, X = shape
+        if chunks is None:
+            chunks = (1, min(16, Z), C, min(512, Y), min(512, X))
+
+        self._store = zarr.open(
+            str(self._path),
+            mode='w',
+            shape=shape,
+            dtype=dtype,
+            chunks=chunks,
+        )
+
+        self.metadata = metadata or {}
+        self.ndim = 5
+
+    @property
+    def shape(self):
+        return self._store.shape
+
+    @property
+    def dtype(self):
+        return self._store.dtype
+
+    def __getitem__(self, key):
+        """Read slices - same interface as proxies."""
+        return np.asarray(self._store[key])
+
+    def __setitem__(self, key, value):
+        """Write slices."""
+        self._store[key] = value
+
+    def save_as(self, filepath):
+        """Export buffer to OME-TIFF."""
+        scale = self.metadata.get('scale', (1.0, 1.0, 1.0))
+        save_tiff(filepath, self._store[:], scale=scale)
+
+    def close(self):
+        """Close and delete the temporary buffer file."""
+        if self._path.exists():
+            shutil.rmtree(self._path)
+
+    def __del__(self):
+        """Cleanup on garbage collection."""
+        try:
+            self.close()
+        except Exception:
+            pass
+
+
+def apply_transform(source, rotation_deg, translate, metadata=None, progress_cb=None):
+    """
+    Apply 2D rotation and translation to create a new buffer.
+
+    Args:
+        source: Source proxy (any 5D array-like with shape attribute)
+        rotation_deg: Rotation angle in degrees
+        translate: (tx, ty) translation in pixels
+        metadata: Optional metadata dict to attach to buffer
+        progress_cb: Optional callback(progress_fraction)
+
+    Returns:
+        ImageBuffer with transformed data
+    """
+    from scipy.ndimage import affine_transform
+
+    T, Z, C, Y, X = source.shape
+
+    # Create output buffer
+    buffer = ImageBuffer(
+        shape=source.shape,
+        dtype=source.dtype,
+        metadata=metadata or getattr(source, 'metadata', {}),
+    )
+
+    # Build affine transform matrix (rotation around center + translation)
+    cx, cy = X / 2, Y / 2
+    theta = np.radians(rotation_deg)
+    cos_t, sin_t = np.cos(theta), np.sin(theta)
+    tx, ty = translate
+
+    # Inverse mapping matrix for scipy
+    matrix = np.array([[cos_t, sin_t], [-sin_t, cos_t]])
+    offset = np.array([
+        cy - cos_t * cy - sin_t * cx - ty,
+        cx + sin_t * cy - cos_t * cx - tx
+    ])
+
+    total = T * Z
+    for t in range(T):
+        for z in range(Z):
+            slice_data = source[t, z, :, :, :]  # (C, Y, X)
+
+            # Transform each channel
+            transformed = np.stack([
+                affine_transform(slice_data[c], matrix, offset, order=1)
+                for c in range(C)
+            ])
+
+            buffer[t, z, :, :, :] = transformed
+
+            if progress_cb:
+                progress_cb((t * Z + z + 1) / total)
+
+    return buffer
 
 
 def normalize_to_5d(data, dims=None, rgb=None):
