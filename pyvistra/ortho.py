@@ -561,4 +561,6 @@ class OrthoViewer(QMainWindow):
         dlg.exec_()
 
     def closeEvent(self, event):
+        # Clear data references to allow garbage collection
+        self.data = None
         super().closeEvent(event)

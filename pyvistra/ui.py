@@ -164,6 +164,14 @@ class ImageWindow(QMainWindow):
     def closeEvent(self, event):
         manager.unregister(self)
         self.window_closing.emit(self)
+
+        # Cleanup data buffers/proxies (ImageBuffer, Imaris5DProxy)
+        if hasattr(self.img_data, 'close'):
+            try:
+                self.img_data.close()
+            except Exception:
+                pass
+
         super().closeEvent(event)
 
     def focusInEvent(self, event):

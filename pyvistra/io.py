@@ -65,6 +65,19 @@ class Imaris5DProxy:
         self.dtype = reader.dtype
         self.ndim = 5
 
+    def close(self):
+        """Close the underlying HDF5 file handle."""
+        if self.reader is not None:
+            self.reader.close()
+            self.reader = None
+
+    def __del__(self):
+        """Cleanup on garbage collection."""
+        try:
+            self.close()
+        except Exception:
+            pass
+
     def __getitem__(self, key):
         """
         Intercepts slicing: data[t, z, c, y, x]
