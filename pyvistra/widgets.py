@@ -2,7 +2,6 @@ import numpy as np
 from qtpy.QtCore import QRectF, Qt, Signal
 from qtpy.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from qtpy.QtWidgets import (
-    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -1302,10 +1301,8 @@ class TransformDialog(QDialog):
         if rotation == 0 and tx == 0 and ty == 0:
             return
 
-        # Disable button and show progress
+        # Disable button during processing
         self.apply_btn.setEnabled(False)
-        self.apply_btn.setText("Applying...")
-        QApplication.processEvents()
 
         try:
             # Create transformed buffer
@@ -1345,7 +1342,6 @@ class TransformDialog(QDialog):
 
         finally:
             self.apply_btn.setEnabled(True)
-            self.apply_btn.setText("Apply Transform")
 
     def refresh_ui(self):
         """Refresh UI to match current renderer state."""
