@@ -316,8 +316,9 @@ def apply_transform(source, rotation_deg, translate, metadata=None, progress_cb=
 
     # Build affine transform matrix (rotation around center + translation)
     # scipy uses inverse mapping: output[o] = input[matrix @ o + offset]
+    # Negate angle because vispy's camera flips Y, inverting visual rotation direction
     cx, cy = X / 2, Y / 2
-    theta = np.radians(rotation_deg)
+    theta = np.radians(-rotation_deg)  # Negate to match vispy's flipped-Y display
     cos_t, sin_t = np.cos(theta), np.sin(theta)
     tx, ty = translate
 
