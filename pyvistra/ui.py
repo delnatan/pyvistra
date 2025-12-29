@@ -23,7 +23,7 @@ from qtpy.QtWidgets import (
 from superqt import QRangeSlider
 from vispy import app, scene
 
-from .io import Numpy5DProxy, load_image, normalize_to_5d
+from .io import Imaris5DProxy, Numpy5DProxy, load_image, normalize_to_5d
 from .manager import manager
 from .ortho import OrthoViewer
 from .roi_manager import get_roi_manager, roi_manager_exists
@@ -49,7 +49,7 @@ class ImageWindow(QMainWindow):
     roi_removed = Signal(object)         # Emits the ROI that was removed
     roi_selection_changed = Signal(object)  # Emits the selected ROI (or None)
 
-    def __init__(self, data_or_path, title="Image"):
+    def __init__(self, data_or_path, title="Image", meta=None):
         super().__init__()
         self.setAttribute(Qt.WA_DeleteOnClose)
 
@@ -60,17 +60,20 @@ class ImageWindow(QMainWindow):
             filename = self.meta.get("filename", "Image")
         else:
             self.filepath = None
-            # Normalize raw data using helper
-            # Note: ImageWindow doesn't take 'dims' arg directly yet,
-            # but usually it's called via imshow which does.
-            # If instantiated directly, we use default heuristics (dims=None).
-            if not isinstance(data_or_path, Numpy5DProxy):
+            self.meta = meta or {}
+
+            # Accept any 5D proxy-like object (Imaris5DProxy, Numpy5DProxy, etc.)
+            if isinstance(data_or_path, (Imaris5DProxy, Numpy5DProxy)):
+                self.img_data = data_or_path
+            elif hasattr(data_or_path, 'shape') and hasattr(data_or_path, 'ndim') and data_or_path.ndim == 5:
+                # Generic 5D proxy-like object
+                self.img_data = data_or_path
+            elif isinstance(data_or_path, np.ndarray):
                 self.img_data = normalize_to_5d(data_or_path)
             else:
-                self.img_data = data_or_path
+                raise ValueError("data must be a 5D proxy, numpy array, or filepath string")
 
-            self.meta = {}
-            filename = title
+            filename = self.meta.get("filename", title)
 
         # Register with Manager
         self.window_id = manager.register(self)
@@ -799,15 +802,27 @@ class Toolbar(QMainWindow):
             print(f"Error opening {filepath}: {e}")
 
 
-def imshow(data, title="Image", dims=None):
+def imshow(data, meta_or_title=None, dims=None, *, title=None):
     """
-    Convenience function to show an image from a numpy array.
+    Convenience function to show an image.
 
     Args:
-        data (np.ndarray): Image data.
-        title (str): Window title.
+        data: Image data (numpy array or 5D proxy from load_image).
+        meta_or_title: Either a metadata dict from load_image(), or a string title.
         dims (str): Dimension order string (e.g. 'tyx', 'zcyx').
-                    If None, heuristics are used.
+                    Only used for numpy arrays. If None, heuristics are used.
+        title (str): Window title (keyword-only, for backward compatibility).
+                     Ignored if meta_or_title is provided.
+
+    Examples:
+        # From load_image (recommended)
+        img, meta = load_image("my_image.ims")
+        imshow(img, meta)
+
+        # From numpy array
+        imshow(my_array, "My Title")
+        imshow(my_array, title="My Title")
+        imshow(my_array, dims="zcyx")
     """
     # Ensure QApplication exists
     app = QApplication.instance()
@@ -819,15 +834,36 @@ def imshow(data, title="Image", dims=None):
 
     app.setStyleSheet(DARK_THEME)
 
-    # Normalize data to 5D (T, Z, C, Y, X)
-    data = normalize_to_5d(data, dims=dims)
+    # Handle backward compatibility: title= keyword argument
+    if meta_or_title is None and title is not None:
+        meta_or_title = title
 
-    viewer = ImageWindow(data, title=title)
+    # Determine title and metadata from second argument
+    meta = None
+    title_str = "Image"
+
+    if isinstance(meta_or_title, dict):
+        meta = meta_or_title
+        title_str = meta.get("filename", "Image")
+    elif isinstance(meta_or_title, str):
+        title_str = meta_or_title
+
+    # Handle different data types
+    if isinstance(data, (Imaris5DProxy, Numpy5DProxy)):
+        # Already a 5D proxy, pass directly
+        pass
+    elif hasattr(data, 'shape') and hasattr(data, 'ndim') and data.ndim == 5:
+        # Generic 5D proxy-like object
+        pass
+    elif isinstance(data, np.ndarray):
+        # Numpy array, normalize to 5D
+        data = normalize_to_5d(data, dims=dims)
+    else:
+        raise ValueError("data must be a 5D proxy, numpy array, or other array-like object")
+
+    viewer = ImageWindow(data, title=title_str, meta=meta)
     viewer.show()
 
-    # If running in interactive shell, we might not want to block?
-    # But usually we need app.exec_() if not in IPython/Jupyter with event loop integration.
-    # For now, just return the viewer.
     return viewer
 
 
