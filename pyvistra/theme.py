@@ -3,7 +3,6 @@ DARK_THEME = """
 QMainWindow, QWidget {
     background-color: #2b2b2b;
     color: #ffffff;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     font-size: 12px;
 }
 
