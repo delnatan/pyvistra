@@ -249,9 +249,12 @@ class OrthoViewer(QMainWindow):
         self.proxy = OrthoVisualProxy([self.vis_yx, self.vis_zy, self.vis_zx])
 
         # -- 3. Crosshairs --
+        # Use cyan color for good contrast against typical fluorescence colormaps
+        crosshair_color = (0, 0.8, 1, 0.7)  # Cyan with 70% opacity
+
         # YX View: V-Line at X, H-Line at Y
-        self.line_yx_v = scene.visuals.InfiniteLine(pos=self.cx, color=(1, 1, 0, 0.5), vertical=True, parent=self.view_yx.scene)
-        self.line_yx_h = scene.visuals.InfiniteLine(pos=self.cy, color=(1, 1, 0, 0.5), vertical=False, parent=self.view_yx.scene)
+        self.line_yx_v = scene.visuals.InfiniteLine(pos=self.cx, color=crosshair_color, vertical=True, parent=self.view_yx.scene)
+        self.line_yx_h = scene.visuals.InfiniteLine(pos=self.cy, color=crosshair_color, vertical=False, parent=self.view_yx.scene)
         self.line_yx_v.set_gl_state(
             preset="translucent",
             blend=True,
@@ -265,8 +268,8 @@ class OrthoViewer(QMainWindow):
             depth_test=False
         )
         # ZY View: V-Line at Z, H-Line at Y
-        self.line_zy_v = scene.visuals.InfiniteLine(pos=self.cz, color=(1, 1, 0, 0.5), vertical=True, parent=self.view_zy.scene)
-        self.line_zy_h = scene.visuals.InfiniteLine(pos=self.cy, color=(1, 1, 0, 0.5), vertical=False, parent=self.view_zy.scene)
+        self.line_zy_v = scene.visuals.InfiniteLine(pos=self.cz, color=crosshair_color, vertical=True, parent=self.view_zy.scene)
+        self.line_zy_h = scene.visuals.InfiniteLine(pos=self.cy, color=crosshair_color, vertical=False, parent=self.view_zy.scene)
         self.line_zy_v.set_gl_state(
             preset="translucent",
             blend=True,
@@ -281,8 +284,8 @@ class OrthoViewer(QMainWindow):
         )
         
         # ZX View: V-Line at X, H-Line at Z
-        self.line_zx_v = scene.visuals.InfiniteLine(pos=self.cx, color=(1, 1, 0, 0.5), vertical=True, parent=self.view_zx.scene)
-        self.line_zx_h = scene.visuals.InfiniteLine(pos=self.cz, color=(1, 1, 0, 0.5), vertical=False, parent=self.view_zx.scene)
+        self.line_zx_v = scene.visuals.InfiniteLine(pos=self.cx, color=crosshair_color, vertical=True, parent=self.view_zx.scene)
+        self.line_zx_h = scene.visuals.InfiniteLine(pos=self.cz, color=crosshair_color, vertical=False, parent=self.view_zx.scene)
         self.line_zx_v.set_gl_state(
             preset="translucent",
             blend=True,
@@ -582,20 +585,20 @@ class OrthoViewer(QMainWindow):
         # ZX View: Slice at Y
         self.vis_zx.update_slice(self.ct, self.cy)
         
-        # Update Crosshairs (Scaled positions)
+        # Update Crosshairs (Scaled positions with half-pixel offset to center on pixel)
         sx, sy, sz = self.scale[2], self.scale[1], self.scale[0]
-        
+
         # YX: V at X, H at Y
-        self.line_yx_v.set_data(pos=self.cx * sx)
-        self.line_yx_h.set_data(pos=self.cy * sy)
-        
+        self.line_yx_v.set_data(pos=(self.cx + 0.5) * sx)
+        self.line_yx_h.set_data(pos=(self.cy + 0.5) * sy)
+
         # ZY: V at Z, H at Y
-        self.line_zy_v.set_data(pos=self.cz * sz)
-        self.line_zy_h.set_data(pos=self.cy * sy)
-        
+        self.line_zy_v.set_data(pos=(self.cz + 0.5) * sz)
+        self.line_zy_h.set_data(pos=(self.cy + 0.5) * sy)
+
         # ZX: V at X, H at Z
-        self.line_zx_v.set_data(pos=self.cx * sx)
-        self.line_zx_h.set_data(pos=self.cz * sz)
+        self.line_zx_v.set_data(pos=(self.cx + 0.5) * sx)
+        self.line_zx_h.set_data(pos=(self.cz + 0.5) * sz)
         
         self.canvas_yx.update()
         self.canvas_zy.update()
