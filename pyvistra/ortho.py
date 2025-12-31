@@ -160,15 +160,23 @@ class OrthoViewer(QMainWindow):
         self.cx = self.X // 2
         self.ct = 0
 
+        # Camera sync flag (must be initialized before reset_cameras)
+        self._syncing_cameras = False
+
         # -- Layout --
         central = QWidget()
         self.setCentralWidget(central)
         self.main_layout = QVBoxLayout(central)
-        
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
+
         # Grid for Views
         self.grid = QGridLayout()
         self.grid.setSpacing(0)
         self.main_layout.addLayout(self.grid, 1)
+
+        # Crosshair visibility state
+        self.crosshair_visible = True
 
         # Calculate physical dimensions for layout stretches
         phys_x = int(self.X * sx)
@@ -282,7 +290,16 @@ class OrthoViewer(QMainWindow):
             blend_func=("src_alpha", "one_minus_src_alpha"),
             depth_test=False
         )
-        # -- 4. Controls --
+
+        # -- 4. Info Bar --
+        self.info_label = QLabel("Hover over image")
+        self.info_label.setStyleSheet(
+            "background-color: #333; color: #EEE; padding: 4px; font-family: monospace;"
+        )
+        self.info_label.setFixedHeight(25)
+        self.main_layout.addWidget(self.info_label, 0)
+
+        # -- 5. Controls --
         self.controls_widget = QWidget()
         self.controls_layout = QVBoxLayout(self.controls_widget)
         self.main_layout.addWidget(self.controls_widget)
@@ -294,17 +311,13 @@ class OrthoViewer(QMainWindow):
         # Initial Update
         self.update_views()
         self.reset_cameras()
-        
-        # Camera Sync
-        # We use Vispy's built-in link functionality.
-        # YX (X, Y) <-> ZY (Z, Y) : Sync Y (axis 1)
-        self.view_zy.camera.link(self.view_yx.camera, axis='y')
-        
-        # YX (X, Y) <-> ZX (X, Z) : Sync X (axis 0)
-        self.view_zx.camera.link(self.view_yx.camera, axis='x')
-        
-        # Note: Z-axis (ZY's X and ZX's Y) is left independent for now
-        # as cross-axis linking is not directly supported by simple link().
+
+        # Camera Synchronization
+        # Use custom synchronization for proper cross-view coordination
+        self._syncing_cameras = False
+        self.view_yx.camera.events.transform.connect(self._on_yx_camera_change)
+        self.view_zy.camera.events.transform.connect(self._on_zy_camera_change)
+        self.view_zx.camera.events.transform.connect(self._on_zx_camera_change)
 
     def _setup_controls(self):
         # Mode (Composite/Single)
@@ -355,6 +368,18 @@ class OrthoViewer(QMainWindow):
         channels_action.triggered.connect(self.show_channel_panel)
         adjust_menu.addAction(channels_action)
 
+        # View
+        view_menu = menubar.addMenu("View")
+        crosshair_action = QAction("Toggle Crosshair", self)
+        crosshair_action.setShortcut("H")
+        crosshair_action.triggered.connect(self.toggle_crosshair)
+        view_menu.addAction(crosshair_action)
+
+        reset_view_action = QAction("Reset View", self)
+        reset_view_action.setShortcut("A")
+        reset_view_action.triggered.connect(self.reset_cameras)
+        view_menu.addAction(reset_view_action)
+
         # Image
         image_menu = menubar.addMenu("Image")
         info_action = QAction("Image Info", self)
@@ -371,6 +396,17 @@ class OrthoViewer(QMainWindow):
         )
         self.canvas_zx.events.mouse_press.connect(
             lambda e: self.on_shift_click(e, 'zx')
+        )
+
+        # Mouse Move Events for status bar
+        self.canvas_yx.events.mouse_move.connect(
+            lambda e: self.on_mouse_move(e, 'yx')
+        )
+        self.canvas_zy.events.mouse_move.connect(
+            lambda e: self.on_mouse_move(e, 'zy')
+        )
+        self.canvas_zx.events.mouse_move.connect(
+            lambda e: self.on_mouse_move(e, 'zx')
         )
 
 
@@ -438,6 +474,95 @@ class OrthoViewer(QMainWindow):
 
         self.update_views()
 
+    def on_mouse_move(self, e, view_name):
+        """Update status bar with position and intensity at cursor."""
+        # Map canvas coordinates to data coordinates
+        if view_name == 'yx':
+            tr_to_data = self.vis_yx.layers[0].get_transform(
+                map_from="canvas", map_to="visual"
+            )
+            pos = tr_to_data.map(e.pos)
+            x, y = int(pos[0]), int(pos[1])
+            z = self.cz  # Current Z slice
+
+            if 0 <= x < self.X and 0 <= y < self.Y:
+                cache = self.vis_yx.current_slice_cache
+                if cache is not None:
+                    vals = self._get_intensity_values(cache, y, x)
+                    self.info_label.setText(
+                        f"X: {x}  Y: {y}  Z: {z}  Val: [{vals}]"
+                    )
+            else:
+                self.info_label.setText("")
+
+        elif view_name == 'zy':
+            tr_to_data = self.vis_zy.layers[0].get_transform(
+                map_from="canvas", map_to="visual"
+            )
+            pos = tr_to_data.map(e.pos)
+            z, y = int(pos[0]), int(pos[1])
+            x = self.cx  # Current X slice
+
+            if 0 <= z < self.Z and 0 <= y < self.Y:
+                cache = self.vis_zy.current_slice_cache
+                if cache is not None:
+                    vals = self._get_intensity_values(cache, y, z)
+                    self.info_label.setText(
+                        f"X: {x}  Y: {y}  Z: {z}  Val: [{vals}]"
+                    )
+            else:
+                self.info_label.setText("")
+
+        elif view_name == 'zx':
+            tr_to_data = self.vis_zx.layers[0].get_transform(
+                map_from="canvas", map_to="visual"
+            )
+            pos = tr_to_data.map(e.pos)
+            x, z = int(pos[0]), int(pos[1])
+            y = self.cy  # Current Y slice
+
+            if 0 <= x < self.X and 0 <= z < self.Z:
+                cache = self.vis_zx.current_slice_cache
+                if cache is not None:
+                    vals = self._get_intensity_values(cache, z, x)
+                    self.info_label.setText(
+                        f"X: {x}  Y: {y}  Z: {z}  Val: [{vals}]"
+                    )
+            else:
+                self.info_label.setText("")
+
+    def _get_intensity_values(self, cache, row, col):
+        """Extract intensity values from cache for all channels."""
+        vals = []
+        for c in range(cache.shape[0]):
+            try:
+                val = cache[c, row, col]
+                vals.append(f"{val:.1f}")
+            except IndexError:
+                pass
+        return ", ".join(vals)
+
+    def toggle_crosshair(self):
+        """Toggle visibility of crosshair lines in all views."""
+        self.crosshair_visible = not self.crosshair_visible
+        visible = self.crosshair_visible
+
+        # YX view crosshairs
+        self.line_yx_v.visible = visible
+        self.line_yx_h.visible = visible
+
+        # ZY view crosshairs
+        self.line_zy_v.visible = visible
+        self.line_zy_h.visible = visible
+
+        # ZX view crosshairs
+        self.line_zx_v.visible = visible
+        self.line_zx_h.visible = visible
+
+        self.canvas_yx.update()
+        self.canvas_zy.update()
+        self.canvas_zx.update()
+
     def update_views(self):
         # Update Slices
         # YX View: Slice at Z
@@ -476,18 +601,91 @@ class OrthoViewer(QMainWindow):
 
     def reset_cameras(self):
         sx, sy, sz = self.scale[2], self.scale[1], self.scale[0]
-        
+
+        # Temporarily disable sync during reset
+        self._syncing_cameras = True
+
         # YX
         self.view_yx.camera.rect = (0, 0, self.X * sx, self.Y * sy)
         self.view_yx.camera.flip = (False, True, False)
-        
+
         # ZY
         self.view_zy.camera.rect = (0, 0, self.Z * sz, self.Y * sy)
         self.view_zy.camera.flip = (False, True, False)
-        
+
         # ZX
         self.view_zx.camera.rect = (0, 0, self.X * sx, self.Z * sz)
         self.view_zx.camera.flip = (False, True, False)
+
+        self._syncing_cameras = False
+
+        # Force canvas updates
+        self.canvas_yx.update()
+        self.canvas_zy.update()
+        self.canvas_zx.update()
+
+    def _on_yx_camera_change(self, event):
+        """Sync Y axis to ZY view and X axis to ZX view when YX camera changes."""
+        if self._syncing_cameras:
+            return
+        self._syncing_cameras = True
+
+        try:
+            yx_rect = self.view_yx.camera.rect
+
+            # Sync Y axis with ZY view (y_min, y_max stay same, z remains)
+            zy_rect = self.view_zy.camera.rect
+            new_zy_rect = (zy_rect.left, yx_rect.bottom, zy_rect.width, yx_rect.height)
+            self.view_zy.camera.rect = new_zy_rect
+
+            # Sync X axis with ZX view (x_min, x_max stay same, z remains)
+            zx_rect = self.view_zx.camera.rect
+            new_zx_rect = (yx_rect.left, zx_rect.bottom, yx_rect.width, zx_rect.height)
+            self.view_zx.camera.rect = new_zx_rect
+        finally:
+            self._syncing_cameras = False
+
+    def _on_zy_camera_change(self, event):
+        """Sync Y axis to YX view and Z axis to ZX view when ZY camera changes."""
+        if self._syncing_cameras:
+            return
+        self._syncing_cameras = True
+
+        try:
+            zy_rect = self.view_zy.camera.rect
+
+            # Sync Y axis with YX view
+            yx_rect = self.view_yx.camera.rect
+            new_yx_rect = (yx_rect.left, zy_rect.bottom, yx_rect.width, zy_rect.height)
+            self.view_yx.camera.rect = new_yx_rect
+
+            # Sync Z axis with ZX view (Z is x in ZY, y in ZX)
+            zx_rect = self.view_zx.camera.rect
+            new_zx_rect = (zx_rect.left, zy_rect.left, zx_rect.width, zy_rect.width)
+            self.view_zx.camera.rect = new_zx_rect
+        finally:
+            self._syncing_cameras = False
+
+    def _on_zx_camera_change(self, event):
+        """Sync X axis to YX view and Z axis to ZY view when ZX camera changes."""
+        if self._syncing_cameras:
+            return
+        self._syncing_cameras = True
+
+        try:
+            zx_rect = self.view_zx.camera.rect
+
+            # Sync X axis with YX view
+            yx_rect = self.view_yx.camera.rect
+            new_yx_rect = (zx_rect.left, yx_rect.bottom, zx_rect.width, yx_rect.height)
+            self.view_yx.camera.rect = new_yx_rect
+
+            # Sync Z axis with ZY view (Z is y in ZX, x in ZY)
+            zy_rect = self.view_zy.camera.rect
+            new_zy_rect = (zx_rect.bottom, zy_rect.bottom, zx_rect.height, zy_rect.height)
+            self.view_zy.camera.rect = new_zy_rect
+        finally:
+            self._syncing_cameras = False
 
     def on_time_change(self, val):
         self.ct = val
