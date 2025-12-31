@@ -313,11 +313,14 @@ class OrthoViewer(QMainWindow):
         self.reset_cameras()
 
         # Camera Synchronization
-        # Use custom synchronization for proper cross-view coordination
+        # Connect to mouse events to sync cameras after zoom/pan operations
         self._syncing_cameras = False
-        self.view_yx.camera.events.transform.connect(self._on_yx_camera_change)
-        self.view_zy.camera.events.transform.connect(self._on_zy_camera_change)
-        self.view_zx.camera.events.transform.connect(self._on_zx_camera_change)
+        self.canvas_yx.events.mouse_wheel.connect(lambda e: self._on_camera_change('yx'))
+        self.canvas_zy.events.mouse_wheel.connect(lambda e: self._on_camera_change('zy'))
+        self.canvas_zx.events.mouse_wheel.connect(lambda e: self._on_camera_change('zx'))
+        self.canvas_yx.events.mouse_release.connect(lambda e: self._on_camera_change('yx'))
+        self.canvas_zy.events.mouse_release.connect(lambda e: self._on_camera_change('zy'))
+        self.canvas_zx.events.mouse_release.connect(lambda e: self._on_camera_change('zx'))
 
     def _setup_controls(self):
         # Mode (Composite/Single)
@@ -624,66 +627,48 @@ class OrthoViewer(QMainWindow):
         self.canvas_zy.update()
         self.canvas_zx.update()
 
-    def _on_yx_camera_change(self, event):
-        """Sync Y axis to ZY view and X axis to ZX view when YX camera changes."""
+    def _on_camera_change(self, source_view):
+        """Sync camera axes across views when one view's camera changes."""
         if self._syncing_cameras:
             return
         self._syncing_cameras = True
 
         try:
-            yx_rect = self.view_yx.camera.rect
+            if source_view == 'yx':
+                # YX changed: sync Y to ZY, X to ZX
+                yx_rect = self.view_yx.camera.rect
 
-            # Sync Y axis with ZY view (y_min, y_max stay same, z remains)
-            zy_rect = self.view_zy.camera.rect
-            new_zy_rect = (zy_rect.left, yx_rect.bottom, zy_rect.width, yx_rect.height)
-            self.view_zy.camera.rect = new_zy_rect
+                zy_rect = self.view_zy.camera.rect
+                new_zy_rect = (zy_rect.left, yx_rect.bottom, zy_rect.width, yx_rect.height)
+                self.view_zy.camera.rect = new_zy_rect
 
-            # Sync X axis with ZX view (x_min, x_max stay same, z remains)
-            zx_rect = self.view_zx.camera.rect
-            new_zx_rect = (yx_rect.left, zx_rect.bottom, yx_rect.width, zx_rect.height)
-            self.view_zx.camera.rect = new_zx_rect
-        finally:
-            self._syncing_cameras = False
+                zx_rect = self.view_zx.camera.rect
+                new_zx_rect = (yx_rect.left, zx_rect.bottom, yx_rect.width, zx_rect.height)
+                self.view_zx.camera.rect = new_zx_rect
 
-    def _on_zy_camera_change(self, event):
-        """Sync Y axis to YX view and Z axis to ZX view when ZY camera changes."""
-        if self._syncing_cameras:
-            return
-        self._syncing_cameras = True
+            elif source_view == 'zy':
+                # ZY changed: sync Y to YX, Z to ZX
+                zy_rect = self.view_zy.camera.rect
 
-        try:
-            zy_rect = self.view_zy.camera.rect
+                yx_rect = self.view_yx.camera.rect
+                new_yx_rect = (yx_rect.left, zy_rect.bottom, yx_rect.width, zy_rect.height)
+                self.view_yx.camera.rect = new_yx_rect
 
-            # Sync Y axis with YX view
-            yx_rect = self.view_yx.camera.rect
-            new_yx_rect = (yx_rect.left, zy_rect.bottom, yx_rect.width, zy_rect.height)
-            self.view_yx.camera.rect = new_yx_rect
+                zx_rect = self.view_zx.camera.rect
+                new_zx_rect = (zx_rect.left, zy_rect.left, zx_rect.width, zy_rect.width)
+                self.view_zx.camera.rect = new_zx_rect
 
-            # Sync Z axis with ZX view (Z is x in ZY, y in ZX)
-            zx_rect = self.view_zx.camera.rect
-            new_zx_rect = (zx_rect.left, zy_rect.left, zx_rect.width, zy_rect.width)
-            self.view_zx.camera.rect = new_zx_rect
-        finally:
-            self._syncing_cameras = False
+            elif source_view == 'zx':
+                # ZX changed: sync X to YX, Z to ZY
+                zx_rect = self.view_zx.camera.rect
 
-    def _on_zx_camera_change(self, event):
-        """Sync X axis to YX view and Z axis to ZY view when ZX camera changes."""
-        if self._syncing_cameras:
-            return
-        self._syncing_cameras = True
+                yx_rect = self.view_yx.camera.rect
+                new_yx_rect = (zx_rect.left, yx_rect.bottom, zx_rect.width, yx_rect.height)
+                self.view_yx.camera.rect = new_yx_rect
 
-        try:
-            zx_rect = self.view_zx.camera.rect
-
-            # Sync X axis with YX view
-            yx_rect = self.view_yx.camera.rect
-            new_yx_rect = (zx_rect.left, yx_rect.bottom, zx_rect.width, yx_rect.height)
-            self.view_yx.camera.rect = new_yx_rect
-
-            # Sync Z axis with ZY view (Z is y in ZX, x in ZY)
-            zy_rect = self.view_zy.camera.rect
-            new_zy_rect = (zx_rect.bottom, zy_rect.bottom, zx_rect.height, zy_rect.height)
-            self.view_zy.camera.rect = new_zy_rect
+                zy_rect = self.view_zy.camera.rect
+                new_zy_rect = (zx_rect.bottom, zy_rect.bottom, zx_rect.height, zy_rect.height)
+                self.view_zy.camera.rect = new_zy_rect
         finally:
             self._syncing_cameras = False
 
