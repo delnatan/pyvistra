@@ -163,6 +163,11 @@ class OrthoViewer(QMainWindow):
         # Camera sync flag (must be initialized before reset_cameras)
         self._syncing_cameras = False
 
+        # Store full extents for zoom calculations (initialized in reset_cameras)
+        self._full_x = self.X * sx
+        self._full_y = self.Y * sy
+        self._full_z = self.Z * sz
+
         # -- Layout --
         central = QWidget()
         self.setCentralWidget(central)
@@ -608,16 +613,21 @@ class OrthoViewer(QMainWindow):
         # Temporarily disable sync during reset
         self._syncing_cameras = True
 
+        # Store full extents for zoom factor calculations
+        self._full_x = self.X * sx
+        self._full_y = self.Y * sy
+        self._full_z = self.Z * sz
+
         # YX
-        self.view_yx.camera.rect = (0, 0, self.X * sx, self.Y * sy)
+        self.view_yx.camera.rect = (0, 0, self._full_x, self._full_y)
         self.view_yx.camera.flip = (False, True, False)
 
         # ZY
-        self.view_zy.camera.rect = (0, 0, self.Z * sz, self.Y * sy)
+        self.view_zy.camera.rect = (0, 0, self._full_z, self._full_y)
         self.view_zy.camera.flip = (False, True, False)
 
         # ZX
-        self.view_zx.camera.rect = (0, 0, self.X * sx, self.Z * sz)
+        self.view_zx.camera.rect = (0, 0, self._full_x, self._full_z)
         self.view_zx.camera.flip = (False, True, False)
 
         self._syncing_cameras = False
@@ -635,39 +645,67 @@ class OrthoViewer(QMainWindow):
 
         try:
             if source_view == 'yx':
-                # YX changed: sync Y to ZY, X to ZX
+                # YX changed: sync Y to ZY, X to ZX, and zoom Z proportionally
                 yx_rect = self.view_yx.camera.rect
 
+                # Calculate zoom factor from YX (use Y axis as reference)
+                zoom_factor = self._full_y / yx_rect.height if yx_rect.height > 0 else 1.0
+
+                # Sync Y axis to ZY, and scale Z axis by same zoom factor
                 zy_rect = self.view_zy.camera.rect
-                new_zy_rect = (zy_rect.left, yx_rect.bottom, zy_rect.width, yx_rect.height)
+                new_z_width = self._full_z / zoom_factor
+                # Center the Z axis around current center
+                z_center = zy_rect.left + zy_rect.width / 2
+                new_z_left = z_center - new_z_width / 2
+                new_zy_rect = (new_z_left, yx_rect.bottom, new_z_width, yx_rect.height)
                 self.view_zy.camera.rect = new_zy_rect
 
+                # Sync X axis to ZX, and scale Z axis by same zoom factor
                 zx_rect = self.view_zx.camera.rect
-                new_zx_rect = (yx_rect.left, zx_rect.bottom, yx_rect.width, zx_rect.height)
+                new_z_height = self._full_z / zoom_factor
+                z_center = zx_rect.bottom + zx_rect.height / 2
+                new_z_bottom = z_center - new_z_height / 2
+                new_zx_rect = (yx_rect.left, new_z_bottom, yx_rect.width, new_z_height)
                 self.view_zx.camera.rect = new_zx_rect
 
             elif source_view == 'zy':
                 # ZY changed: sync Y to YX, Z to ZX
                 zy_rect = self.view_zy.camera.rect
 
+                # Calculate zoom factor from ZY (use Y axis as reference)
+                zoom_factor = self._full_y / zy_rect.height if zy_rect.height > 0 else 1.0
+
+                # Sync Y axis to YX, scale X by same zoom factor
                 yx_rect = self.view_yx.camera.rect
-                new_yx_rect = (yx_rect.left, zy_rect.bottom, yx_rect.width, zy_rect.height)
+                new_x_width = self._full_x / zoom_factor
+                x_center = yx_rect.left + yx_rect.width / 2
+                new_x_left = x_center - new_x_width / 2
+                new_yx_rect = (new_x_left, zy_rect.bottom, new_x_width, zy_rect.height)
                 self.view_yx.camera.rect = new_yx_rect
 
+                # Sync Z axis to ZX
                 zx_rect = self.view_zx.camera.rect
-                new_zx_rect = (zx_rect.left, zy_rect.left, zx_rect.width, zy_rect.width)
+                new_zx_rect = (new_x_left, zy_rect.left, new_x_width, zy_rect.width)
                 self.view_zx.camera.rect = new_zx_rect
 
             elif source_view == 'zx':
                 # ZX changed: sync X to YX, Z to ZY
                 zx_rect = self.view_zx.camera.rect
 
+                # Calculate zoom factor from ZX (use X axis as reference)
+                zoom_factor = self._full_x / zx_rect.width if zx_rect.width > 0 else 1.0
+
+                # Sync X axis to YX, scale Y by same zoom factor
                 yx_rect = self.view_yx.camera.rect
-                new_yx_rect = (zx_rect.left, yx_rect.bottom, zx_rect.width, yx_rect.height)
+                new_y_height = self._full_y / zoom_factor
+                y_center = yx_rect.bottom + yx_rect.height / 2
+                new_y_bottom = y_center - new_y_height / 2
+                new_yx_rect = (zx_rect.left, new_y_bottom, zx_rect.width, new_y_height)
                 self.view_yx.camera.rect = new_yx_rect
 
+                # Sync Z axis to ZY
                 zy_rect = self.view_zy.camera.rect
-                new_zy_rect = (zx_rect.bottom, zy_rect.bottom, zx_rect.height, zy_rect.height)
+                new_zy_rect = (zx_rect.bottom, new_y_bottom, zx_rect.height, new_y_height)
                 self.view_zy.camera.rect = new_zy_rect
         finally:
             self._syncing_cameras = False
