@@ -139,7 +139,7 @@ class HistogramWidget(QWidget):
 
         # 4. Text Labels
         painter.setPen(TEXT_COLOR)
-        font = QFont("Segoe UI", 8)
+        font = QFont()
         painter.setFont(font)
 
         # Draw min/max values at handles

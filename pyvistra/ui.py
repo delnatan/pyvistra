@@ -23,14 +23,20 @@ from qtpy.QtWidgets import (
 from superqt import QRangeSlider
 from vispy import app, scene
 
+from .console import console_exists, get_console
 from .io import Imaris5DProxy, Numpy5DProxy, load_image, normalize_to_5d
 from .manager import manager
 from .ortho import OrthoViewer
 from .roi_manager import get_roi_manager, roi_manager_exists
-from .console import get_console, console_exists
 from .rois import CircleROI, CoordinateROI, LineROI, RectangleROI
 from .visuals import CompositeImageVisual
-from .widgets import AlignmentDialog, ChannelPanel, ContrastDialog, MetadataDialog, TransformDialog
+from .widgets import (
+    AlignmentDialog,
+    ChannelPanel,
+    ContrastDialog,
+    MetadataDialog,
+    TransformDialog,
+)
 
 try:
     app.use_app(API_NAME)
@@ -42,11 +48,11 @@ class ImageWindow(QMainWindow):
     """Main image viewer window with ROI support."""
 
     # Signals for decoupled communication
-    window_activated = Signal(object)    # Emits self when window becomes active
-    window_shown = Signal(object)        # Emits self when window is shown
-    window_closing = Signal(object)      # Emits self when window is closing
-    roi_added = Signal(object)           # Emits the ROI that was added
-    roi_removed = Signal(object)         # Emits the ROI that was removed
+    window_activated = Signal(object)  # Emits self when window becomes active
+    window_shown = Signal(object)  # Emits self when window is shown
+    window_closing = Signal(object)  # Emits self when window is closing
+    roi_added = Signal(object)  # Emits the ROI that was added
+    roi_removed = Signal(object)  # Emits the ROI that was removed
     roi_selection_changed = Signal(object)  # Emits the selected ROI (or None)
 
     def __init__(self, data_or_path, title="Image", meta=None):
@@ -65,13 +71,19 @@ class ImageWindow(QMainWindow):
             # Accept any 5D proxy-like object (Imaris5DProxy, Numpy5DProxy, etc.)
             if isinstance(data_or_path, (Imaris5DProxy, Numpy5DProxy)):
                 self.img_data = data_or_path
-            elif hasattr(data_or_path, 'shape') and hasattr(data_or_path, 'ndim') and data_or_path.ndim == 5:
+            elif (
+                hasattr(data_or_path, "shape")
+                and hasattr(data_or_path, "ndim")
+                and data_or_path.ndim == 5
+            ):
                 # Generic 5D proxy-like object
                 self.img_data = data_or_path
             elif isinstance(data_or_path, np.ndarray):
                 self.img_data = normalize_to_5d(data_or_path)
             else:
-                raise ValueError("data must be a 5D proxy, numpy array, or filepath string")
+                raise ValueError(
+                    "data must be a 5D proxy, numpy array, or filepath string"
+                )
 
             filename = self.meta.get("filename", title)
 
@@ -107,14 +119,16 @@ class ImageWindow(QMainWindow):
         # 4. Info Bar
         self.info_label = QLabel("Hover over image")
         self.info_label.setStyleSheet(
-            "background-color: #333; color: #EEE; padding: 4px; font-family: monospace;"
+            "background-color: #333; color: #EEE; padding: 4px;"
         )
         self.info_label.setFixedHeight(25)
         self.layout.addWidget(self.info_label, 0)
 
         # 5. Visuals
         is_rgb = self.meta.get("is_rgb", False)
-        self.renderer = CompositeImageVisual(self.view, self.img_data, is_rgb=is_rgb)
+        self.renderer = CompositeImageVisual(
+            self.view, self.img_data, is_rgb=is_rgb
+        )
         self.renderer.reset_camera(self.img_data.shape)
 
         # 6. Controls Area (Sliders + Mode)
@@ -169,7 +183,7 @@ class ImageWindow(QMainWindow):
         self.window_closing.emit(self)
 
         # Cleanup data buffers/proxies (ImageBuffer, Imaris5DProxy)
-        if hasattr(self.img_data, 'close'):
+        if hasattr(self.img_data, "close"):
             try:
                 self.img_data.close()
             except Exception:
@@ -195,6 +209,7 @@ class ImageWindow(QMainWindow):
         elif event.key() == Qt.Key_L:
             # Toggle ROI labels visibility
             from .rois import ROI
+
             show = ROI.toggle_labels()
             # Update visibility for all ROIs in all windows
             for w in manager.get_all().values():
@@ -590,7 +605,10 @@ class ImageWindow(QMainWindow):
             end_pos = (x, y)
 
             # Shift key constrains LineROI to horizontal/vertical
-            if isinstance(self.drawing_roi, LineROI) and 'Shift' in event.modifiers:
+            if (
+                isinstance(self.drawing_roi, LineROI)
+                and "Shift" in event.modifiers
+            ):
                 sx, sy = self.start_pos
                 dx = abs(x - sx)
                 dy = abs(y - sy)
@@ -775,7 +793,7 @@ class Toolbar(QMainWindow):
         if console_exists():
             try:
                 console = get_console()
-                if hasattr(console, 'cleanup'):
+                if hasattr(console, "cleanup"):
                     console.cleanup()
             except Exception:
                 pass
@@ -852,14 +870,16 @@ def imshow(data, meta_or_title=None, dims=None, *, title=None):
     if isinstance(data, (Imaris5DProxy, Numpy5DProxy)):
         # Already a 5D proxy, pass directly
         pass
-    elif hasattr(data, 'shape') and hasattr(data, 'ndim') and data.ndim == 5:
+    elif hasattr(data, "shape") and hasattr(data, "ndim") and data.ndim == 5:
         # Generic 5D proxy-like object
         pass
     elif isinstance(data, np.ndarray):
         # Numpy array, normalize to 5D
         data = normalize_to_5d(data, dims=dims)
     else:
-        raise ValueError("data must be a 5D proxy, numpy array, or other array-like object")
+        raise ValueError(
+            "data must be a 5D proxy, numpy array, or other array-like object"
+        )
 
     viewer = ImageWindow(data, title=title_str, meta=meta)
     viewer.show()
