@@ -351,6 +351,9 @@ class OrthoViewer(QMainWindow):
         self.controls_layout = QVBoxLayout(self.controls_widget)
         self.main_layout.addWidget(self.controls_widget)
 
+        # Store event handlers for proper cleanup on close
+        self._event_handlers = []
+
         self._setup_controls()
         self._setup_menu()
         self._setup_events()
@@ -362,24 +365,28 @@ class OrthoViewer(QMainWindow):
         # Camera Synchronization
         # Connect to mouse events to sync cameras after zoom/pan operations
         self._syncing_cameras = False
-        self.canvas_yx.events.mouse_wheel.connect(
-            lambda e: self._on_camera_change("yx")
-        )
-        self.canvas_zy.events.mouse_wheel.connect(
-            lambda e: self._on_camera_change("zy")
-        )
-        self.canvas_zx.events.mouse_wheel.connect(
-            lambda e: self._on_camera_change("zx")
-        )
-        self.canvas_yx.events.mouse_release.connect(
-            lambda e: self._on_camera_change("yx")
-        )
-        self.canvas_zy.events.mouse_release.connect(
-            lambda e: self._on_camera_change("zy")
-        )
-        self.canvas_zx.events.mouse_release.connect(
-            lambda e: self._on_camera_change("zx")
-        )
+
+        def make_camera_handler(view_name):
+            def handler(e):
+                self._on_camera_change(view_name)
+
+            return handler
+
+        for canvas, view_name in [
+            (self.canvas_yx, "yx"),
+            (self.canvas_zy, "zy"),
+            (self.canvas_zx, "zx"),
+        ]:
+            wheel_handler = make_camera_handler(view_name)
+            release_handler = make_camera_handler(view_name)
+            canvas.events.mouse_wheel.connect(wheel_handler)
+            canvas.events.mouse_release.connect(release_handler)
+            self._event_handlers.append(
+                (canvas.events.mouse_wheel, wheel_handler)
+            )
+            self._event_handlers.append(
+                (canvas.events.mouse_release, release_handler)
+            )
 
     def _setup_controls(self):
         # Mode (Composite/Single)
@@ -449,27 +456,33 @@ class OrthoViewer(QMainWindow):
         image_menu.addAction(info_action)
 
     def _setup_events(self):
-        # Mouse Events for clicking (add 'Shift' key modifier)
-        self.canvas_yx.events.mouse_press.connect(
-            lambda e: self.on_shift_click(e, "yx")
-        )
-        self.canvas_zy.events.mouse_press.connect(
-            lambda e: self.on_shift_click(e, "zy")
-        )
-        self.canvas_zx.events.mouse_press.connect(
-            lambda e: self.on_shift_click(e, "zx")
-        )
+        def make_click_handler(view_name):
+            def handler(e):
+                self.on_shift_click(e, view_name)
 
-        # Mouse Move Events for status bar
-        self.canvas_yx.events.mouse_move.connect(
-            lambda e: self.on_mouse_move(e, "yx")
-        )
-        self.canvas_zy.events.mouse_move.connect(
-            lambda e: self.on_mouse_move(e, "zy")
-        )
-        self.canvas_zx.events.mouse_move.connect(
-            lambda e: self.on_mouse_move(e, "zx")
-        )
+            return handler
+
+        def make_move_handler(view_name):
+            def handler(e):
+                self.on_mouse_move(e, view_name)
+
+            return handler
+
+        for canvas, view_name in [
+            (self.canvas_yx, "yx"),
+            (self.canvas_zy, "zy"),
+            (self.canvas_zx, "zx"),
+        ]:
+            click_handler = make_click_handler(view_name)
+            move_handler = make_move_handler(view_name)
+            canvas.events.mouse_press.connect(click_handler)
+            canvas.events.mouse_move.connect(move_handler)
+            self._event_handlers.append(
+                (canvas.events.mouse_press, click_handler)
+            )
+            self._event_handlers.append(
+                (canvas.events.mouse_move, move_handler)
+            )
 
     def on_shift_click(self, e, view_name):
         if e.button != 1:
@@ -885,6 +898,35 @@ class OrthoViewer(QMainWindow):
         dlg.exec_()
 
     def closeEvent(self, event):
+        # Disconnect all event handlers to prevent callbacks to dead objects
+        for event_emitter, handler in self._event_handlers:
+            try:
+                event_emitter.disconnect(handler)
+            except Exception:
+                pass
+        self._event_handlers.clear()
+
+        # Unparent crosshair visuals from scene
+        for line in [
+            self.line_yx_v,
+            self.line_yx_h,
+            self.line_zy_v,
+            self.line_zy_h,
+            self.line_zx_v,
+            self.line_zx_h,
+        ]:
+            try:
+                line.parent = None
+            except Exception:
+                pass
+
+        # Close data proxy if it has a close method (e.g., HDF5 file handles)
+        if hasattr(self.data, "close"):
+            try:
+                self.data.close()
+            except Exception:
+                pass
+
         # Clear data references to allow garbage collection
         self.data = None
         super().closeEvent(event)
