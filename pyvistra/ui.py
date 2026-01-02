@@ -203,7 +203,7 @@ class ImageWindow(QMainWindow):
             event.handled = True
 
     def keyPressEvent(self, event):
-        elif event.key() == Qt.Key_A:
+        if event.key() == Qt.Key_A:
             self.renderer.reset_camera(self.img_data.shape)
             self.canvas.update()
         elif event.key() == Qt.Key_F:
