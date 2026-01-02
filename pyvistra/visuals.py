@@ -82,7 +82,7 @@ class CompositeImageVisual:
         self.scale = scale  # (sy, sx)
         self.layers = []
         self.is_rgb = is_rgb  # True for RGB color images
-
+        self.num_channels = self.data.shape[2]
         # State
         self.mode = "composite"
         self.active_channel_idx = 0
@@ -343,7 +343,9 @@ class CompositeImageVisual:
         transform.scale((sx, sy, 1))
         transform.translate((-cx, -cy, 0))
         transform.rotate(self._rotation_deg, (0, 0, 1))
-        transform.translate((cx + self._translate_x, cy + self._translate_y, 0))
+        transform.translate(
+            (cx + self._translate_x, cy + self._translate_y, 0)
+        )
 
         return transform
 

@@ -37,8 +37,13 @@ from superqt import QRangeSlider
 from vispy import scene
 
 from .io import load_image
-from .visuals import CompositeImageVisual, COLORMAPS, DEFAULT_CHANNEL_COLORMAPS, get_colormap
-from .widgets import ContrastDialog, CompactHistogramWidget
+from .visuals import (
+    COLORMAPS,
+    DEFAULT_CHANNEL_COLORMAPS,
+    CompositeImageVisual,
+    get_colormap,
+)
+from .widgets import CompactHistogramWidget, ContrastDialog
 
 
 class TiledVisualProxy:
@@ -56,9 +61,11 @@ class TiledVisualProxy:
 
         # Global settings (applied to all tiles)
         self._channel_colormaps = {}  # channel_idx -> colormap_name
-        self._channel_gammas = {}     # channel_idx -> gamma value
-        self._channel_visibility = {} # channel_idx -> bool
-        self._channel_colors = list(DEFAULT_CHANNEL_COLORMAPS)  # Display colors
+        self._channel_gammas = {}  # channel_idx -> gamma value
+        self._channel_visibility = {}  # channel_idx -> bool
+        self._channel_colors = list(
+            DEFAULT_CHANNEL_COLORMAPS
+        )  # Display colors
 
     def update_max_channels(self, max_c):
         """Update the maximum number of channels across all tiles."""
@@ -66,7 +73,9 @@ class TiledVisualProxy:
         # Initialize defaults for new channels
         for c in range(max_c):
             if c not in self._channel_colormaps:
-                self._channel_colormaps[c] = DEFAULT_CHANNEL_COLORMAPS[c % len(DEFAULT_CHANNEL_COLORMAPS)]
+                self._channel_colormaps[c] = DEFAULT_CHANNEL_COLORMAPS[
+                    c % len(DEFAULT_CHANNEL_COLORMAPS)
+                ]
             if c not in self._channel_gammas:
                 self._channel_gammas[c] = 1.0
             if c not in self._channel_visibility:
@@ -79,7 +88,11 @@ class TiledVisualProxy:
 
     def _get_tile_renderers(self):
         """Get all renderers from loaded tiles."""
-        return [t.renderer for t in self.viewer.tile_widgets if t.renderer is not None]
+        return [
+            t.renderer
+            for t in self.viewer.tile_widgets
+            if t.renderer is not None
+        ]
 
     def set_colormap(self, channel_idx, cmap_name):
         """Set colormap for a channel across all tiles."""
@@ -92,6 +105,7 @@ class TiledVisualProxy:
         elif not display_color:
             # For matplotlib colormaps, sample a representative color
             import matplotlib.cm as mpl_cm
+
             spec = COLORMAPS.get(cmap_name)
             if isinstance(spec, str) and spec.startswith("mpl:"):
                 mpl_name = spec[4:]
@@ -147,7 +161,10 @@ class TiledVisualProxy:
         """
         all_data = []
         for tile in self.viewer.tile_widgets:
-            if tile.renderer is None or tile.renderer.current_slice_cache is None:
+            if (
+                tile.renderer is None
+                or tile.renderer.current_slice_cache is None
+            ):
                 continue
             cache = tile.renderer.current_slice_cache
             if channel_idx < cache.shape[0]:
@@ -177,7 +194,9 @@ class TiledVisualProxy:
             if c in self._channel_gammas:
                 tile.renderer.set_gamma(c, self._channel_gammas[c])
             if c in self._channel_visibility:
-                tile.renderer.set_channel_visible(c, self._channel_visibility[c])
+                tile.renderer.set_channel_visible(
+                    c, self._channel_visibility[c]
+                )
 
 
 class TiledChannelRow(QWidget):
@@ -268,7 +287,9 @@ class TiledChannelRow(QWidget):
         self._gamma_callback = None
         self._clim_callback = None
 
-    def set_callbacks(self, visibility_cb, colormap_cb, gamma_cb, clim_cb=None):
+    def set_callbacks(
+        self, visibility_cb, colormap_cb, gamma_cb, clim_cb=None
+    ):
         """Set callback functions for changes."""
         self._visibility_callback = visibility_cb
         self._colormap_callback = colormap_cb
@@ -328,9 +349,13 @@ class TiledChannelRow(QWidget):
         for cmap_name in COLORMAPS.keys():
             action = menu.addAction(cmap_name)
             action.triggered.connect(
-                lambda checked, name=cmap_name: self._on_colormap_selected(name)
+                lambda checked, name=cmap_name: self._on_colormap_selected(
+                    name
+                )
             )
-        menu.exec_(self.color_btn.mapToGlobal(self.color_btn.rect().bottomLeft()))
+        menu.exec_(
+            self.color_btn.mapToGlobal(self.color_btn.rect().bottomLeft())
+        )
 
     def _on_colormap_selected(self, cmap_name):
         self.current_colormap = cmap_name
@@ -389,7 +414,9 @@ class TiledChannelPanel(QDialog):
         layout.setSpacing(4)
 
         # Info label
-        info_label = QLabel(f"<b>Global Channel Settings</b> ({viewer.max_C} channels)")
+        info_label = QLabel(
+            f"<b>Global Channel Settings</b> ({viewer.max_C} channels)"
+        )
         info_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(info_label)
 
@@ -425,7 +452,9 @@ class TiledChannelPanel(QDialog):
         btn_layout.addStretch()
 
         btn_auto = QPushButton("Auto Contrast All")
-        btn_auto.setToolTip("Apply percentile-based auto-contrast to each tile")
+        btn_auto.setToolTip(
+            "Apply percentile-based auto-contrast to each tile"
+        )
         btn_auto.clicked.connect(self._auto_contrast_all)
         btn_layout.addWidget(btn_auto)
 
@@ -439,14 +468,16 @@ class TiledChannelPanel(QDialog):
         """Create a row widget for each channel."""
         for c in range(self.viewer.max_C):
             ch_name = f"Ch {c + 1}"
-            color = self.proxy.channel_colors[c % len(self.proxy.channel_colors)]
+            color = self.proxy.channel_colors[
+                c % len(self.proxy.channel_colors)
+            ]
 
             row = TiledChannelRow(c, ch_name, color)
             row.set_callbacks(
                 self._on_visibility_changed,
                 self._on_colormap_changed,
                 self._on_gamma_changed,
-                self._on_clim_changed
+                self._on_clim_changed,
             )
 
             self.channel_rows.append(row)
@@ -465,7 +496,9 @@ class TiledChannelPanel(QDialog):
         self._update_all_canvases()
 
         # Update color swatch
-        color = self.proxy.channel_colors[channel_idx % len(self.proxy.channel_colors)]
+        color = self.proxy.channel_colors[
+            channel_idx % len(self.proxy.channel_colors)
+        ]
         self.channel_rows[channel_idx]._update_color_swatch(color)
 
         # Refresh histogram with new color
@@ -497,7 +530,9 @@ class TiledChannelPanel(QDialog):
         for c, row in enumerate(self.channel_rows):
             # Get aggregate data for this channel
             agg_data = self.proxy.get_aggregate_data(c)
-            color = self.proxy.channel_colors[c % len(self.proxy.channel_colors)]
+            color = self.proxy.channel_colors[
+                c % len(self.proxy.channel_colors)
+            ]
 
             if agg_data is not None and agg_data.size > 0:
                 row.set_data(agg_data, color)
@@ -755,7 +790,7 @@ class TileWidget(QFrame):
             self.renderer = None
 
         # Close data if it has a close method (ImageBuffer, Imaris5DProxy)
-        if self.data is not None and hasattr(self.data, 'close'):
+        if self.data is not None and hasattr(self.data, "close"):
             try:
                 self.data.close()
             except Exception:
@@ -957,7 +992,7 @@ class TiledViewer(QMainWindow):
         super().__init__(parent)
         self.setAttribute(Qt.WA_DeleteOnClose)
 
-        self.image_paths = sorted(image_paths)
+        self.image_paths = image_paths
         self.tiles_per_page = tiles_per_page
         self.current_page = 0
         self.tile_size = 200  # Default tile size in pixels

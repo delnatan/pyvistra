@@ -3,6 +3,7 @@ import os
 import sys
 
 import numpy as np
+from natsort import natsort_key
 from qtpy import API_NAME
 from qtpy.QtCore import Qt, Signal
 from qtpy.QtGui import QDragEnterEvent, QDropEvent
@@ -774,7 +775,7 @@ class Toolbar(QMainWindow):
                 image_files.append(f)
 
         # Sort by filename
-        image_files.sort()
+        image_files.sort(key=natsort_key)
 
         if len(image_files) > 1:
             # Multiple files -> TiledViewer
