@@ -167,6 +167,7 @@ class ImageWindow(QMainWindow):
         self.canvas.events.mouse_move.connect(self.on_mouse_move)
         self.canvas.events.mouse_press.connect(self.on_mouse_press)
         self.canvas.events.mouse_release.connect(self.on_mouse_release)
+        self.canvas.events.key_press.connect(self._on_vispy_key_press)
 
         # Focus policy
         self.setFocusPolicy(Qt.StrongFocus)
@@ -195,11 +196,13 @@ class ImageWindow(QMainWindow):
         self.window_activated.emit(self)
         super().focusInEvent(event)
 
+    def _on_vispy_key_press(self, event):
+        """Block certain keys from reaching VisPy's camera handles"""
+        if event.key == "Backspace":
+            # prevent PanZoom camera from resetting view on Backspace
+            event.handled = True
+
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Delete:
-            # Consume delete key to prevent VisPy default behavior
-            event.accept()
-            return
         elif event.key() == Qt.Key_A:
             self.renderer.reset_camera(self.img_data.shape)
             self.canvas.update()
