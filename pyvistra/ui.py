@@ -44,6 +44,64 @@ except Exception:
     app.use_app("pyqt5")
 
 
+def _is_interactive_qt_session():
+    """
+    Check if we're in an interactive environment with Qt event loop running.
+
+    Returns True if:
+    - Running in IPython/Jupyter with %gui qt enabled
+    - Qt event loop is already running
+
+    This allows imshow() to be non-blocking like matplotlib's plt.show().
+    """
+    # Check if Qt event loop is already running
+    qapp = QApplication.instance()
+    if qapp is not None:
+        # Check if event loop is running (e.g., from %gui qt)
+        try:
+            from qtpy.QtCore import QEventLoop
+
+            if qapp.thread().loopLevel() > 0:
+                return True
+        except Exception:
+            pass
+
+    # Check for IPython with Qt integration
+    try:
+        ipy = get_ipython()  # noqa: F821 - defined in IPython
+        # Check if Qt event loop hook is registered
+        gui = getattr(ipy, "active_eventloop", None)
+        if gui in ("qt", "qt5", "qt6"):
+            return True
+        # Older IPython versions
+        if hasattr(ipy, "pt_app") and ipy.pt_app is not None:
+            # prompt_toolkit is running, check for Qt integration
+            if hasattr(ipy, "_inputhook") and "qt" in str(type(ipy._inputhook)).lower():
+                return True
+    except NameError:
+        # get_ipython not defined, not in IPython
+        pass
+    except Exception:
+        pass
+
+    # Check for Jupyter kernel with Qt integration
+    try:
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+        if loop is not None:
+            # There's an async event loop running (Jupyter)
+            # Qt integration is likely via qasync or similar
+            return True
+    except RuntimeError:
+        # No running event loop
+        pass
+    except Exception:
+        pass
+
+    return False
+
+
 class ImageWindow(QMainWindow):
     """Main image viewer window with ROI support."""
 
@@ -824,6 +882,11 @@ def imshow(data, meta_or_title=None, dims=None, *, title=None):
     """
     Convenience function to show an image.
 
+    In interactive environments (IPython with %gui qt, Jupyter), the window
+    appears immediately and is non-blocking, similar to matplotlib's imshow().
+
+    In script mode, call run_app() after imshow() to start the event loop.
+
     Args:
         data: Image data (numpy array or 5D proxy from load_image).
         meta_or_title: Either a metadata dict from load_image(), or a string title.
@@ -832,25 +895,29 @@ def imshow(data, meta_or_title=None, dims=None, *, title=None):
         title (str): Window title (keyword-only, for backward compatibility).
                      Ignored if meta_or_title is provided.
 
-    Examples:
-        # From load_image (recommended)
-        img, meta = load_image("my_image.ims")
-        imshow(img, meta)
+    Returns:
+        ImageWindow: The viewer window. Use window.close() to close it.
+                     The window is automatically cleaned up when closed.
 
-        # From numpy array
-        imshow(my_array, "My Title")
-        imshow(my_array, title="My Title")
-        imshow(my_array, dims="zcyx")
+    Examples:
+        # Interactive (IPython/Jupyter with %gui qt)
+        >>> img, meta = load_image("my_image.ims")
+        >>> w1 = imshow(img, meta)
+        >>> w2 = imshow(other_img)  # Compare side by side
+
+        # Script mode
+        >>> imshow(my_array)
+        >>> run_app()  # Blocks until all windows closed
     """
     # Ensure QApplication exists
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication(sys.argv)
+    qapp = QApplication.instance()
+    if qapp is None:
+        qapp = QApplication(sys.argv)
 
     # Apply Theme
     from .theme import DARK_THEME
 
-    app.setStyleSheet(DARK_THEME)
+    qapp.setStyleSheet(DARK_THEME)
 
     # Handle backward compatibility: title= keyword argument
     if meta_or_title is None and title is not None:
@@ -884,6 +951,14 @@ def imshow(data, meta_or_title=None, dims=None, *, title=None):
     viewer = ImageWindow(data, title=title_str, meta=meta)
     viewer.show()
 
+    # Bring window to front and give it focus
+    viewer.raise_()
+    viewer.activateWindow()
+
+    # In interactive mode, process events so window appears immediately
+    if _is_interactive_qt_session():
+        qapp.processEvents()
+
     return viewer
 
 
@@ -891,10 +966,49 @@ def run_app():
     """
     Start the Qt event loop. Use this when running from a script
     to ensure windows are visible and interactive.
+
+    This call blocks until all windows are closed.
+
+    In interactive environments (IPython with %gui qt), this is not needed
+    as the event loop is already running.
     """
-    app = QApplication.instance()
-    if app:
+    if _is_interactive_qt_session():
+        print("Note: Event loop already running (interactive mode). "
+              "run_app() is not needed.")
+        return
+
+    qapp = QApplication.instance()
+    if qapp:
         from .theme import DARK_THEME
 
-        app.setStyleSheet(DARK_THEME)
-        app.exec_()
+        qapp.setStyleSheet(DARK_THEME)
+        qapp.exec_()
+
+
+def get_windows():
+    """
+    Get all currently open ImageWindow instances.
+
+    Returns:
+        dict: Mapping of window_id -> ImageWindow for all open windows.
+
+    Example:
+        >>> w = imshow(my_array)
+        >>> get_windows()
+        {1: <ImageWindow ...>}
+        >>> w.close()
+        >>> get_windows()
+        {}
+    """
+    return manager.get_all()
+
+
+def close_all():
+    """
+    Close all open ImageWindow instances.
+
+    Windows are properly cleaned up (data proxies closed, unregistered).
+    """
+    windows = list(manager.get_all().values())
+    for w in windows:
+        w.close()
