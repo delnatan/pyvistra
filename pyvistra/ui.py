@@ -196,7 +196,11 @@ class ImageWindow(QMainWindow):
         super().focusInEvent(event)
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key_A:
+        if event.key() == Qt.Key_Delete:
+            # Consume delete key to prevent VisPy default behavior
+            event.accept()
+            return
+        elif event.key() == Qt.Key_A:
             self.renderer.reset_camera(self.img_data.shape)
             self.canvas.update()
         elif event.key() == Qt.Key_F:
@@ -308,10 +312,16 @@ class ImageWindow(QMainWindow):
         dlg.exec_()
 
     def show_ortho_view(self):
+        # Copy colormap settings from current renderer
+        colormaps = {}
+        for c in range(self.renderer.num_channels):
+            colormaps[c] = self.renderer.get_colormap_name(c)
+
         self.ortho_viewer = OrthoViewer(
             self.img_data,
             self.meta,
             title=f"Ortho View - {self.windowTitle()}",
+            channel_colormaps=colormaps,
         )
         self.ortho_viewer.show()
 

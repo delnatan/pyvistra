@@ -143,7 +143,7 @@ class TransposedProxy:
 
 
 class OrthoViewer(QMainWindow):
-    def __init__(self, data, meta=None, title="Ortho View"):
+    def __init__(self, data, meta=None, title="Ortho View", channel_colormaps=None):
         super().__init__()
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.setWindowTitle(title)
@@ -151,6 +151,7 @@ class OrthoViewer(QMainWindow):
 
         self.data = data  # (T, Z, C, Y, X)
         self.meta = meta or {}
+        self._channel_colormaps = channel_colormaps  # Store for later application
         self.T, self.Z, self.C, self.Y, self.X = self.data.shape
 
         # Scale (z, y, x)
@@ -256,6 +257,11 @@ class OrthoViewer(QMainWindow):
         )
 
         self.proxy = OrthoVisualProxy([self.vis_yx, self.vis_zy, self.vis_zx])
+
+        # Apply colormaps from source window if provided
+        if self._channel_colormaps:
+            for channel_idx, cmap_name in self._channel_colormaps.items():
+                self.proxy.set_colormap(channel_idx, cmap_name)
 
         # -- 3. Crosshairs --
         # Use cyan color for good contrast against typical fluorescence colormaps
