@@ -559,15 +559,28 @@ def load_image(filepath, use_memmap=True):
     }
 
 
-def save_tiff(filepath, data, scale=(1.0, 1.0, 1.0), axes="TZCYX"):
+def save_tiff(filepath, data, scale=(1.0, 1.0, 1.0), axes="TZCYX", input_axes=None):
     """
     Saves a 5D array to a TIFF file with metadata.
 
     Args:
         filepath (str): Output path.
-        data (array-like): 5D data (T, Z, C, Y, X).
+        data (array-like): Image data. If input_axes is None, expects 5D (T, Z, C, Y, X).
         scale (tuple): Voxel size (z, y, x).
-        axes (str): Dimension order.
+        axes (str): Dimension order for output TIFF metadata.
+        input_axes (str): Optional axes string describing input data order (e.g., "YX",
+                          "ZYX", "CZYX"). When provided, data is normalized to 5D before
+                          saving. Case-insensitive.
+
+    Examples:
+        # Save a 2D image
+        save_tiff("out.tif", img_2d, input_axes="YX")
+
+        # Save a 3D z-stack
+        save_tiff("out.tif", zstack, input_axes="ZYX")
+
+        # Save with channel dimension
+        save_tiff("out.tif", multichannel, input_axes="CZYX")
     """
     # Ensure data is numpy array (loads into memory)
     # If it's a proxy, slicing [:] triggers reading.
@@ -577,6 +590,10 @@ def save_tiff(filepath, data, scale=(1.0, 1.0, 1.0), axes="TZCYX"):
     except TypeError:
         # Fallback if slicing not supported directly or data is list
         image = np.asarray(data)
+
+    # Normalize to 5D if input_axes is specified
+    if input_axes is not None:
+        image = normalize_to_5d(image, dims=input_axes).array
 
     sz, sy, sx = scale
 
