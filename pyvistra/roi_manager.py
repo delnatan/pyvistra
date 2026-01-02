@@ -141,6 +141,21 @@ class ROIManager(QWidget):
             event.ignore()
             self.hide()
 
+    def keyPressEvent(self, event):
+        """Handle keyboard shortcuts."""
+        if event.key() == Qt.Key_Delete:
+            self.delete_roi()
+        elif event.key() == Qt.Key_F:
+            # Flip selected CoordinateROI
+            item = self.roi_list.currentItem()
+            if item and self.active_window:
+                roi = item.data(Qt.UserRole)
+                if isinstance(roi, CoordinateROI):
+                    roi.flip()
+                    self.active_window.canvas.update()
+        else:
+            super().keyPressEvent(event)
+
     def cleanup(self):
         """Prepare for application shutdown.
 
