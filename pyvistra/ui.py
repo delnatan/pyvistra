@@ -967,20 +967,20 @@ def imshow(data, meta_or_title=None, dims=None, *, title=None):
     return viewer
 
 
-def run_app():
+def show():
     """
     Start the Qt event loop (blocking).
 
     Only needed when running from a script. In IPython/Jupyter,
     imshow() automatically enables Qt integration, so windows are
-    immediately interactive without calling run_app().
+    immediately interactive without calling show().
 
     Example (script):
-        from pyvistra import imshow, run_app
+        import pyvistra as pv
         import numpy as np
 
-        imshow(np.random.rand(100, 100), "Random")
-        run_app()  # Blocks until window is closed
+        pv.imshow(np.random.rand(100, 100), "Random")
+        pv.show()  # Blocks until window is closed
     """
     qapp = QApplication.instance()
     if qapp:
@@ -988,3 +988,7 @@ def run_app():
 
         qapp.setStyleSheet(DARK_THEME)
         qapp.exec_()
+
+
+# Backwards compatibility alias
+run_app = show

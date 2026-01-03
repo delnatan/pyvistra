@@ -18,7 +18,7 @@ from .manager import WindowManager, manager
 from .ortho import OrthoViewer
 from .roi_manager import ROIManager, get_roi_manager
 from .rois import ROI, CircleROI, CoordinateROI, LineROI, RectangleROI
-from .ui import ImageWindow, Toolbar, imshow, run_app
+from .ui import ImageWindow, Toolbar, imshow, run_app, show
 
 __all__ = [
     "__version__",
@@ -32,7 +32,8 @@ __all__ = [
     "ImageWindow",
     "Toolbar",
     "imshow",
-    "run_app",
+    "show",
+    "run_app",  # backwards compatibility
     # rois
     "ROI",
     "RectangleROI",
