@@ -235,6 +235,23 @@ class ImageWindow(QMainWindow):
         manager.unregister(self)
         self.window_closing.emit(self)
 
+        # Disconnect Vispy event handlers to break circular references
+        try:
+            self.canvas.events.mouse_move.disconnect(self.on_mouse_move)
+            self.canvas.events.mouse_press.disconnect(self.on_mouse_press)
+            self.canvas.events.mouse_release.disconnect(self.on_mouse_release)
+            self.canvas.events.key_press.disconnect(self._on_vispy_key_press)
+        except Exception:
+            pass
+
+        # Cleanup renderer (removes visual layers from scene)
+        if self.renderer is not None:
+            try:
+                self.renderer.cleanup()
+            except Exception:
+                pass
+            self.renderer = None
+
         # Cleanup Vispy canvas and OpenGL resources
         try:
             self.canvas.close()
@@ -242,15 +259,13 @@ class ImageWindow(QMainWindow):
             pass
 
         # Cleanup data buffers/proxies (ImageBuffer, Imaris5DProxy)
-        if hasattr(self.img_data, "close"):
-            try:
-                self.img_data.close()
-            except Exception:
-                pass
-
-        # Clear references to help garbage collection
-        self.renderer = None
-        self.img_data = None
+        if hasattr(self, 'img_data') and self.img_data is not None:
+            if hasattr(self.img_data, "close"):
+                try:
+                    self.img_data.close()
+                except Exception:
+                    pass
+            self.img_data = None
 
         # If this was the last window and no Toolbar is managing the app,
         # quit the Qt event loop to return control to the caller.
