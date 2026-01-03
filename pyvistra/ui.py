@@ -47,6 +47,8 @@ except Exception:
 
 # Track if Toolbar exists (for proper app lifecycle management)
 _toolbar_instance = None
+# Track if Qt integration has been enabled (to avoid repeated calls)
+_qt_integration_enabled = False
 
 
 def toolbar_exists():
@@ -72,14 +74,22 @@ def _enable_qt_integration():
 
     Returns True if integration was enabled, False otherwise.
     """
+    global _qt_integration_enabled
+
+    # Only try once per session
+    if _qt_integration_enabled:
+        return True
+
     try:
         ip = get_ipython()
         # Check if Qt integration is already active
         if hasattr(ip, 'active_eventloop') and ip.active_eventloop == 'qt':
+            _qt_integration_enabled = True
             return True
         # Enable Qt integration
         if hasattr(ip, 'enable_gui'):
             ip.enable_gui('qt')
+            _qt_integration_enabled = True
             return True
     except NameError:
         pass
@@ -225,12 +235,22 @@ class ImageWindow(QMainWindow):
         manager.unregister(self)
         self.window_closing.emit(self)
 
+        # Cleanup Vispy canvas and OpenGL resources
+        try:
+            self.canvas.close()
+        except Exception:
+            pass
+
         # Cleanup data buffers/proxies (ImageBuffer, Imaris5DProxy)
         if hasattr(self.img_data, "close"):
             try:
                 self.img_data.close()
             except Exception:
                 pass
+
+        # Clear references to help garbage collection
+        self.renderer = None
+        self.img_data = None
 
         # If this was the last window and no Toolbar is managing the app,
         # quit the Qt event loop to return control to the caller.
@@ -982,6 +1002,14 @@ def show():
         pv.imshow(np.random.rand(100, 100), "Random")
         pv.show()  # Blocks until window is closed
     """
+    # In interactive mode, the event loop is already running
+    if _is_interactive():
+        return
+
+    # Don't start event loop if no windows to show
+    if not manager.get_all():
+        return
+
     qapp = QApplication.instance()
     if qapp:
         from .theme import DARK_THEME
