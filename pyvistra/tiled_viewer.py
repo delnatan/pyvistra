@@ -713,8 +713,9 @@ class TileWidget(QFrame):
         self.view.camera = "panzoom"
         self.view.camera.aspect = 1
 
-        # Connect to camera transform event for sync
-        self.view.camera.events.transform.connect(self._on_camera_transform)
+        # Connect to canvas events for camera sync (wheel=zoom, release=end of pan)
+        self.canvas.events.mouse_wheel.connect(self._on_camera_change)
+        self.canvas.events.mouse_release.connect(self._on_camera_change)
 
         # Canvas widget
         self.canvas.native.setMinimumSize(50, 50)
@@ -862,8 +863,8 @@ class TileWidget(QFrame):
             self.view.camera.flip = (False, True, False)
             self.canvas.update()
 
-    def _on_camera_transform(self, event):
-        """Handle camera transform event (pan/zoom changed)."""
+    def _on_camera_change(self, event):
+        """Handle camera change event (pan/zoom changed)."""
         if self._ignore_camera_events:
             return
         if self._camera_change_callback is not None:
