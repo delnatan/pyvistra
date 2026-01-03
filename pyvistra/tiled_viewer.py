@@ -675,6 +675,10 @@ class TileWidget(QFrame):
         self._proj_range = (0, 0)
         self._show_info = True  # Whether to show info label
 
+        # Camera sync callback
+        self._camera_change_callback = None
+        self._ignore_camera_events = False
+
         # Setup UI
         self._setup_ui()
 
@@ -708,6 +712,9 @@ class TileWidget(QFrame):
         self.view = self.canvas.central_widget.add_view()
         self.view.camera = "panzoom"
         self.view.camera.aspect = 1
+
+        # Connect to camera transform event for sync
+        self.view.camera.events.transform.connect(self._on_camera_transform)
 
         # Canvas widget
         self.canvas.native.setMinimumSize(50, 50)
@@ -854,6 +861,30 @@ class TileWidget(QFrame):
             self.view.camera.set_range(x=(0, w), y=(0, h), margin=0.02)
             self.view.camera.flip = (False, True, False)
             self.canvas.update()
+
+    def _on_camera_transform(self, event):
+        """Handle camera transform event (pan/zoom changed)."""
+        if self._ignore_camera_events:
+            return
+        if self._camera_change_callback is not None:
+            self._camera_change_callback(self)
+
+    def set_camera_callback(self, callback):
+        """Set callback for camera change events."""
+        self._camera_change_callback = callback
+
+    def get_camera_rect(self):
+        """Get current camera view rect."""
+        return self.view.camera.rect
+
+    def set_camera_rect(self, rect):
+        """Set camera view rect (for synchronization)."""
+        self._ignore_camera_events = True
+        try:
+            self.view.camera.rect = rect
+            self.canvas.update()
+        finally:
+            self._ignore_camera_events = False
 
     def _update_info(self):
         """Update info label with filename and view state."""
@@ -1004,6 +1035,10 @@ class TiledViewer(QMainWindow):
         self.channel_idx = 0
         self.z_projection = False
         self.z_proj_range = (0, 0)
+
+        # Sync pan/zoom state
+        self.sync_pan_zoom = False
+        self._syncing_camera = False  # Flag to prevent recursive updates
 
         # Detected max dimensions across all images (populated on first load)
         self.max_T = 1
@@ -1186,6 +1221,16 @@ class TiledViewer(QMainWindow):
         self.reset_all_btn.clicked.connect(self._reset_all_views)
         toolbar2_layout.addWidget(self.reset_all_btn)
 
+        toolbar2_layout.addSpacing(10)
+
+        # Sync pan/zoom checkbox
+        self.sync_panzoom_check = QCheckBox("Sync Pan/Zoom (S)")
+        self.sync_panzoom_check.setToolTip(
+            "Synchronize pan and zoom across all tiles"
+        )
+        self.sync_panzoom_check.toggled.connect(self._on_sync_panzoom_toggled)
+        toolbar2_layout.addWidget(self.sync_panzoom_check)
+
         toolbar2_layout.addStretch()
 
         main_layout.addWidget(toolbar2)
@@ -1338,6 +1383,7 @@ class TiledViewer(QMainWindow):
         for path in self.image_paths[start:end]:
             tile = TileWidget(self.tile_size, parent=self)
             tile.set_show_info(self.show_info)
+            tile.set_camera_callback(self._on_tile_camera_changed)
             tile.load(path)
             # Apply global visual settings (colormap, gamma, visibility)
             self.visual_proxy.apply_settings_to_tile(tile)
@@ -1453,6 +1499,24 @@ class TiledViewer(QMainWindow):
         # Trigger reflow
         self.flow_container.adjustSize()
 
+    def _on_sync_panzoom_toggled(self, checked):
+        """Handle sync pan/zoom checkbox toggle."""
+        self.sync_pan_zoom = checked
+
+    def _on_tile_camera_changed(self, source_tile):
+        """Handle camera change from a tile and sync to others if enabled."""
+        if not self.sync_pan_zoom or self._syncing_camera:
+            return
+
+        self._syncing_camera = True
+        try:
+            rect = source_tile.get_camera_rect()
+            for tile in self.tile_widgets:
+                if tile is not source_tile:
+                    tile.set_camera_rect(rect)
+        finally:
+            self._syncing_camera = False
+
     def _toggle_show_info(self):
         """Toggle info label visibility."""
         self.show_info_check.setChecked(not self.show_info_check.isChecked())
@@ -1511,6 +1575,11 @@ class TiledViewer(QMainWindow):
         elif key == Qt.Key_H:
             # Open channel panel (Shift+H is handled by menu shortcut)
             self.show_channel_panel()
+        elif key == Qt.Key_S:
+            # Toggle sync pan/zoom
+            self.sync_panzoom_check.setChecked(
+                not self.sync_panzoom_check.isChecked()
+            )
         else:
             super().keyPressEvent(event)
 
