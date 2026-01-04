@@ -45,6 +45,57 @@ except Exception:
     app.use_app("pyqt5")
 
 
+# Track if Toolbar exists (for proper app lifecycle management)
+_toolbar_instance = None
+# Track if Qt integration has been enabled (to avoid repeated calls)
+_qt_integration_enabled = False
+
+
+def toolbar_exists():
+    """Check if a Toolbar has been created."""
+    return _toolbar_instance is not None
+
+
+def _is_interactive():
+    """Check if running in an interactive environment (IPython/Jupyter)."""
+    try:
+        get_ipython()
+        return True
+    except NameError:
+        return False
+
+
+def _enable_qt_integration():
+    """
+    Enable Qt event loop integration for interactive environments.
+
+    This allows windows to be interactive without blocking the prompt,
+    similar to matplotlib's behavior with %matplotlib qt.
+
+    Returns True if integration was enabled, False otherwise.
+    """
+    global _qt_integration_enabled
+
+    # Only try once per session
+    if _qt_integration_enabled:
+        return True
+
+    try:
+        ip = get_ipython()
+        # Check if Qt integration is already active
+        if hasattr(ip, 'active_eventloop') and ip.active_eventloop == 'qt':
+            _qt_integration_enabled = True
+            return True
+        # Enable Qt integration
+        if hasattr(ip, 'enable_gui'):
+            ip.enable_gui('qt')
+            _qt_integration_enabled = True
+            return True
+    except NameError:
+        pass
+    return False
+
+
 class ImageWindow(QMainWindow):
     """Main image viewer window with ROI support."""
 
@@ -184,10 +235,44 @@ class ImageWindow(QMainWindow):
         manager.unregister(self)
         self.window_closing.emit(self)
 
-        # Cleanup data buffers/proxies (ImageBuffer, Imaris5DProxy)
-        if hasattr(self.img_data, "close"):
+        # Disconnect Vispy event handlers to break circular references
+        try:
+            self.canvas.events.mouse_move.disconnect(self.on_mouse_move)
+            self.canvas.events.mouse_press.disconnect(self.on_mouse_press)
+            self.canvas.events.mouse_release.disconnect(self.on_mouse_release)
+            self.canvas.events.key_press.disconnect(self._on_vispy_key_press)
+        except Exception:
+            pass
+
+        # Cleanup renderer (removes visual layers from scene)
+        if self.renderer is not None:
             try:
-                self.img_data.close()
+                self.renderer.cleanup()
+            except Exception:
+                pass
+            self.renderer = None
+
+        # Cleanup Vispy canvas and OpenGL resources
+        try:
+            self.canvas.close()
+        except Exception:
+            pass
+
+        # Cleanup data buffers/proxies (ImageBuffer, Imaris5DProxy)
+        if hasattr(self, 'img_data') and self.img_data is not None:
+            if hasattr(self.img_data, "close"):
+                try:
+                    self.img_data.close()
+                except Exception:
+                    pass
+            self.img_data = None
+
+        # If this was the last window and no Toolbar is managing the app,
+        # quit the Qt event loop to return control to the caller.
+        # Skip this in interactive mode (IPython) where the event loop persists.
+        if not manager.get_all() and not toolbar_exists() and not _is_interactive():
+            try:
+                app.quit()
             except Exception:
                 pass
 
@@ -652,7 +737,9 @@ class ImageWindow(QMainWindow):
 
 class Toolbar(QMainWindow):
     def __init__(self):
+        global _toolbar_instance
         super().__init__()
+        _toolbar_instance = self
         self.setWindowTitle("pyvistra v0.1 (prototype)")
         self.setGeometry(100, 100, 600, 100)  # Wider
         self.setAcceptDrops(True)
@@ -838,6 +925,9 @@ def imshow(data, meta_or_title=None, dims=None, *, title=None):
     """
     Convenience function to show an image.
 
+    In IPython/Jupyter, windows are immediately interactive (like matplotlib).
+    In scripts, call run_app() after imshow() to start the event loop.
+
     Args:
         data: Image data (numpy array or 5D proxy from load_image).
         meta_or_title: Either a metadata dict from load_image(), or a string title.
@@ -846,25 +936,36 @@ def imshow(data, meta_or_title=None, dims=None, *, title=None):
         title (str): Window title (keyword-only, for backward compatibility).
                      Ignored if meta_or_title is provided.
 
+    Returns:
+        ImageWindow: The viewer window instance.
+
     Examples:
-        # From load_image (recommended)
+        # In IPython - windows are immediately interactive:
+        >>> img, meta = load_image("my_image.ims")
+        >>> imshow(img, meta)  # Window appears, prompt returns immediately
+
+        # In a script - need run_app() to block:
         img, meta = load_image("my_image.ims")
         imshow(img, meta)
+        run_app()  # Blocks until all windows are closed
 
-        # From numpy array
-        imshow(my_array, "My Title")
-        imshow(my_array, title="My Title")
-        imshow(my_array, dims="zcyx")
+        # Multiple images in IPython:
+        >>> imshow(img1, "Image 1")
+        >>> imshow(img2, "Image 2")  # Both windows are interactive
     """
     # Ensure QApplication exists
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication(sys.argv)
+    qapp = QApplication.instance()
+    if qapp is None:
+        qapp = QApplication(sys.argv)
 
     # Apply Theme
     from .theme import DARK_THEME
 
-    app.setStyleSheet(DARK_THEME)
+    qapp.setStyleSheet(DARK_THEME)
+
+    # Enable Qt event loop integration in IPython for interactive use
+    # This makes windows immediately responsive without needing run_app()
+    _enable_qt_integration()
 
     # Handle backward compatibility: title= keyword argument
     if meta_or_title is None and title is not None:
@@ -901,14 +1002,36 @@ def imshow(data, meta_or_title=None, dims=None, *, title=None):
     return viewer
 
 
-def run_app():
+def show():
     """
-    Start the Qt event loop. Use this when running from a script
-    to ensure windows are visible and interactive.
+    Start the Qt event loop (blocking).
+
+    Only needed when running from a script. In IPython/Jupyter,
+    imshow() automatically enables Qt integration, so windows are
+    immediately interactive without calling show().
+
+    Example (script):
+        import pyvistra as pv
+        import numpy as np
+
+        pv.imshow(np.random.rand(100, 100), "Random")
+        pv.show()  # Blocks until window is closed
     """
-    app = QApplication.instance()
-    if app:
+    # In interactive mode, the event loop is already running
+    if _is_interactive():
+        return
+
+    # Don't start event loop if no windows to show
+    if not manager.get_all():
+        return
+
+    qapp = QApplication.instance()
+    if qapp:
         from .theme import DARK_THEME
 
-        app.setStyleSheet(DARK_THEME)
-        app.exec_()
+        qapp.setStyleSheet(DARK_THEME)
+        qapp.exec_()
+
+
+# Backwards compatibility alias
+run_app = show

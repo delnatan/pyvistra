@@ -400,3 +400,18 @@ class CompositeImageVisual:
         self._translate_x = 0.0
         self._translate_y = 0.0
         self._apply_transform_to_layers()
+
+    def cleanup(self):
+        """Remove all visual layers and release resources.
+
+        Call this before closing the window to prevent resource accumulation.
+        """
+        for layer in self.layers:
+            try:
+                layer.parent = None  # Detach from scene
+            except Exception:
+                pass
+        self.layers.clear()
+        self.current_slice_cache = None
+        self.data = None
+        self.view = None
