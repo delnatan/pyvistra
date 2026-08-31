@@ -6,6 +6,7 @@ from .proxies import (
     Imaris5DProxy,
     Numpy5DProxy,
     Zarr5DProxy,
+    materialize,
 )
 from .annotations import TileAnnotations
 from .buffer import ImageBuffer
@@ -29,6 +30,7 @@ __all__ = [
     "Imaris5DProxy",
     "Numpy5DProxy",
     "Zarr5DProxy",
+    "materialize",
     "TileAnnotations",
     "ImageBuffer",
     "PointTable",

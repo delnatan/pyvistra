@@ -11,6 +11,7 @@ from qtpy.QtWidgets import (
     QFileDialog,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QProgressBar,
     QStyle,
     QToolBar,
@@ -22,6 +23,8 @@ from vispy import app
 from .. import colors as tokens
 from .._version import get_version
 from ..apps.console import console_exists, get_console
+from ..io import estimate_load_bytes
+from ..settings import get_in_memory_threshold_bytes
 from .manager import manager
 
 
@@ -36,15 +39,16 @@ class _ImageLoadWorker(QObject):
     finished = Signal(object, object, str, object)
     error = Signal(str, str, object)  # message, filepath, worker
 
-    def __init__(self, filepath):
+    def __init__(self, filepath, load_mode="mapped"):
         super().__init__()
         self.filepath = filepath
+        self.load_mode = load_mode
 
     def run(self):
         from ..io import load_image
 
         try:
-            data, meta = load_image(self.filepath)
+            data, meta = load_image(self.filepath, load_mode=self.load_mode)
         except Exception as e:
             self.error.emit(str(e), self.filepath, self)
             return
@@ -409,7 +413,15 @@ class Toolbar(QMainWindow):
         super().closeEvent(event)
 
     def spawn_viewer(self, filepath):
-        worker = _ImageLoadWorker(filepath)
+        load_mode = "mapped"
+        nbytes = estimate_load_bytes(filepath)
+        if nbytes is not None:
+            if nbytes < get_in_memory_threshold_bytes():
+                load_mode = "memory"
+            else:
+                load_mode = self._prompt_load_mode(filepath, nbytes)
+
+        worker = _ImageLoadWorker(filepath, load_mode)
         thread = QThread(self)
         worker.moveToThread(thread)
 
@@ -426,6 +438,32 @@ class Toolbar(QMainWindow):
         self._pending_loads[worker] = thread
         self._update_loading_indicator(os.path.basename(filepath))
         thread.start()
+
+    def _prompt_load_mode(self, filepath, nbytes):
+        """Ask whether a large file should be loaded fully into memory or
+        kept memory-mapped. Defaults to memory-mapped, since eagerly
+        pulling a large file off a slow/external/network drive without
+        asking could stall the app for a long time."""
+        mb = nbytes / (1024 * 1024)
+        size_str = f"{mb:.1f} MB" if mb < 10 else f"{mb:.0f} MB"
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle("Large Image")
+        box.setText(
+            f"{os.path.basename(filepath)} is about {size_str} when fully "
+            "loaded."
+        )
+        box.setInformativeText(
+            "Loading it into memory gives smoother panning/scrubbing, but "
+            "may take a while on a slow or external drive.\n\n"
+            "Keeping it memory-mapped opens instantly and uses far less "
+            "RAM, reading data from disk as needed."
+        )
+        memory_btn = box.addButton("Load into Memory", QMessageBox.AcceptRole)
+        mapped_btn = box.addButton("Keep Memory-Mapped", QMessageBox.RejectRole)
+        box.setDefaultButton(mapped_btn)
+        box.exec_()
+        return "memory" if box.clickedButton() is memory_btn else "mapped"
 
     def _update_loading_indicator(self, filepath_hint=None):
         """Show/hide the toolbar busy indicator based on how many

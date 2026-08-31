@@ -799,7 +799,7 @@ def load_nd2(filepath):
     return data_proxy, meta
 
 
-def load_image(filepath, use_memmap=True, dims=None):
+def load_image(filepath, use_memmap=True, dims=None, load_mode="mapped"):
     """
     Loads an image and normalizes it to (T, Z, C, Y, X).
     Returns: (image_data_proxy, metadata_dict)
@@ -809,6 +809,12 @@ def load_image(filepath, use_memmap=True, dims=None):
         use_memmap: If True, use memory-mapped loading for TIFFs.
         dims: Optional dimension string for TIFF files (e.g., 'tyx', 'zyx', 'tzyx').
               If None, heuristics are used. Only applies to TIFF/PNG/JPEG formats.
+        load_mode: "mapped" (default) returns whatever lazy/memory-mapped
+              proxy the format normally produces. "memory" additionally
+              reads the whole thing into a plain in-memory array (see
+              :func:`pyvistra.data.proxies.materialize`) -- use this once
+              you've already decided the file is small enough, e.g. via
+              :func:`estimate_load_bytes`.
 
     Supported formats are whatever's registered via ``register_input_format``
     (see ``available_input_formats()``). Built in: .ims (Imaris), .czi (Zeiss
@@ -819,7 +825,58 @@ def load_image(filepath, use_memmap=True, dims=None):
     """
     data, meta = _load_image_raw(filepath, use_memmap=use_memmap, dims=dims)
     _normalize_channels_metadata(meta)
+    if load_mode == "memory":
+        from .data.proxies import materialize
+
+        data = materialize(data)
     return data, meta
+
+
+def estimate_load_bytes(filepath):
+    """Cheap, header-only estimate of a file's fully-loaded in-memory
+    footprint, or ``None`` if the format has no lazy alternative to weigh
+    against (ND2 and standard images always load eagerly already, so
+    there's nothing to decide).
+
+    Never reads pixel data -- safe to call before deciding a ``load_mode``
+    for :func:`load_image`.
+    """
+    try:
+        if filepath.endswith(".zarr/") and os.path.isdir(filepath):
+            proxy, _ = load_zarr(filepath)
+            try:
+                return int(np.prod(proxy.shape)) * proxy.dtype.itemsize
+            finally:
+                proxy.close()
+
+        lower = filepath.lower()
+
+        if lower.endswith((".nd2", ".png", ".jpg", ".jpeg")):
+            return None
+
+        if lower.endswith(".ims"):
+            reader = ImarisReader(filepath)
+            try:
+                return int(np.prod(reader.shape)) * reader.dtype.itemsize
+            finally:
+                reader.close()
+
+        if lower.endswith(".czi"):
+            from .readers.czi import CZIReader
+
+            reader = CZIReader(filepath)
+            try:
+                return int(np.prod(reader.shape)) * reader.dtype.itemsize
+            finally:
+                reader.close()
+
+        # TIFF, and the same unrecognized-extension-as-TIFF fallback that
+        # _load_image_raw uses -- header-only, never memmaps or reads.
+        with tifffile.TiffFile(filepath) as tif:
+            series = tif.series[0]
+            return int(np.prod(series.shape)) * series.dtype.itemsize
+    except Exception:
+        return None
 
 
 def _load_image_raw(filepath, use_memmap=True, dims=None):

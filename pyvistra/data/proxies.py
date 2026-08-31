@@ -238,3 +238,24 @@ class Zarr5DProxy(RefCountMixin):
             self.release()
         except Exception:
             pass
+
+
+# ---------------------------------------------------------------------------
+# Eager materialization
+# ---------------------------------------------------------------------------
+
+def materialize(proxy):
+    """Read a lazy 5D proxy fully into memory.
+
+    Works for any of the proxy types above, since they all already support
+    full 5D slicing via ``__getitem__`` -- no per-format eager-load path
+    needed. The result is reshaped to ``proxy.shape``: some proxies (e.g.
+    ``Zarr5DProxy`` wrapping a lower-dimensional array) squeeze out
+    singleton axes on read, and reshape is always safe here since only
+    size-1 axes ever differ.
+    """
+    if isinstance(proxy, Numpy5DProxy) and not isinstance(proxy.array, np.memmap):
+        return proxy  # already a plain in-memory array
+    array = np.asarray(proxy[:, :, :, :, :]).reshape(proxy.shape)
+    proxy.release()
+    return Numpy5DProxy(array)
