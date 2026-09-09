@@ -1480,8 +1480,17 @@ class PaintbrushROI(ROI):
 
     def fill(self, shape):
         """
-        Flood-fill the area enclosed by the brush strokes (or the image
-        border) and store the result as a boolean mask.
+        Fill the area(s) enclosed by the brush strokes and store the
+        result as a boolean mask.
+
+        Any region fully enclosed by strokes - not touching the image
+        border at all - is filled; this supports several independent
+        closed shapes drawn on one ROI. A stroke that instead divides the
+        image by reaching the border on both ends (e.g. a line traced
+        across the whole image) has no such true enclosure, since both
+        halves it creates touch the border independently; there's no way
+        to infer which side is wanted without extra input, so the smaller
+        of the two is filled.
 
         Args:
             shape: (Y, X) shape of the target image.
@@ -1489,10 +1498,30 @@ class PaintbrushROI(ROI):
         Returns:
             The filled boolean (Y, X) mask.
         """
-        from scipy.ndimage import binary_fill_holes
+        from scipy.ndimage import label
 
         stroke_mask = self.rasterize(shape)
-        self.mask = binary_fill_holes(stroke_mask)
+        background = ~stroke_mask
+        labels, num_features = label(background)
+
+        fill_mask = np.zeros(shape, dtype=bool)
+        border_regions = []  # (label, pixel count) for regions touching the edge
+        for lbl in range(1, num_features + 1):
+            region = labels == lbl
+            touches_border = (
+                region[0, :].any() or region[-1, :].any()
+                or region[:, 0].any() or region[:, -1].any()
+            )
+            if touches_border:
+                border_regions.append((lbl, region.sum()))
+            else:
+                fill_mask |= region  # fully enclosed hole - always fill
+
+        if len(border_regions) >= 2:
+            smallest_label = min(border_regions, key=lambda lc: lc[1])[0]
+            fill_mask |= labels == smallest_label
+
+        self.mask = fill_mask | stroke_mask
         self._update_mask_visual()
         return self.mask
 
