@@ -1349,11 +1349,11 @@ class PaintbrushROI(ROI):
                 return
 
     def _update_handles(self):
-        pts = self._flatten()
-        if not pts:
-            return
-        self.handle_points = {i: pts[i] for i in range(len(pts))}
-        self.handle_visual.set_data(pos=np.array(pts), face_color="white", size=10)
+        # No per-point handles: a paintbrush stroke can have thousands of
+        # points (many auto-inserted by add_point's interpolation), so a
+        # draggable handle at every one would flood the view. The ROI can
+        # still be dragged as a whole via hit_test's "center" result.
+        pass
 
     def hit_test(self, point):
         """Test proximity to any stroke segment/stamp, or inside the fill."""
