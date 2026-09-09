@@ -165,7 +165,6 @@ class ImageWindow(QMainWindow):
         self._freed_roi_ids = []  # min-heap of freed IDs for reuse
         self.drawing_roi = None
         self.start_pos = None
-        self.active_paintbrush_roi = None  # Current paintbrush layer, if any
         # Editing State
         self.dragging_roi = None
         self.drag_handle = None
@@ -328,9 +327,14 @@ class ImageWindow(QMainWindow):
             self._free_roi_id(roi)
             roi.remove()
             self.rois.remove(roi)
-            if roi is self.active_paintbrush_roi:
-                self.active_paintbrush_roi = None
             self.roi_removed.emit(roi)
+
+    def find_selected_roi(self, cls):
+        """Return the currently selected ROI of the given class, if any."""
+        for roi in self.rois:
+            if roi.selected and isinstance(roi, cls):
+                return roi
+        return None
 
     def show_metadata_dialog(self):
         dlg = MetadataDialog(self.meta, parent=self)
@@ -356,10 +360,6 @@ class ImageWindow(QMainWindow):
             self.view.camera.interactive = True
         else:
             self.view.camera.interactive = False
-        if tool != "paintbrush":
-            # Leaving the paintbrush tool ends the current layer; picking
-            # it again later starts a new one.
-            self.active_paintbrush_roi = None
 
     def show_contrast_dialog(self):
         if self.contrast_dialog is None:
@@ -582,14 +582,24 @@ class ImageWindow(QMainWindow):
 
         self.start_pos = (x, y)
 
-        # Paintbrush strokes accumulate onto one ROI/layer until the tool
-        # is switched away (see update_cursor), rather than each mouse
+        # Freehand/paintbrush/eraser continue on the currently selected ROI
+        # of the matching type (so re-selecting a layer in the ROI Manager
+        # lets you keep drawing/erasing on it), rather than each mouse
         # press starting a brand new ROI.
-        if tool == "paintbrush" and self.active_paintbrush_roi is not None:
-            self.drawing_roi = self.active_paintbrush_roi
-            self.drawing_roi.start_new_stroke((x, y))
-            self.canvas.update()
-            return
+        if tool == "freehand":
+            existing = self.find_selected_roi(FreehandROI)
+            if existing is not None:
+                self.drawing_roi = existing
+                self.drawing_roi.add_point((x, y))
+                self.canvas.update()
+                return
+        elif tool in ("paintbrush", "eraser"):
+            existing = self.find_selected_roi(PaintbrushROI)
+            if existing is not None:
+                self.drawing_roi = existing
+                self.drawing_roi.start_new_stroke((x, y), erase=(tool == "eraser"))
+                self.canvas.update()
+                return
 
         # Get unique ROI ID (reuses freed IDs via heapq)
         roi_index = str(self._get_next_roi_id())
@@ -604,19 +614,30 @@ class ImageWindow(QMainWindow):
             self.drawing_roi = LineROI(self.view, name=roi_index)
         elif tool == "freehand":
             self.drawing_roi = FreehandROI(self.view, name=roi_index)
-        elif tool == "paintbrush":
+        elif tool in ("paintbrush", "eraser"):
             self.drawing_roi = PaintbrushROI(
-                self.view, name=roi_index, radius=manager.paintbrush_radius
+                self.view,
+                name=roi_index,
+                radius=manager.paintbrush_radius,
+                shape=(self.Y, self.X),
             )
-            self.active_paintbrush_roi = self.drawing_roi
 
         if self.drawing_roi:
             self.rois.append(self.drawing_roi)
             self.roi_added.emit(self.drawing_roi)
+
+            if tool in ("freehand", "paintbrush", "eraser"):
+                # Select the new layer so re-selecting it later lets
+                # drawing/erasing continue on it.
+                for roi in self.rois:
+                    roi.select(roi is self.drawing_roi)
+                self.roi_selection_changed.emit(self.drawing_roi)
+
             # Initial update
-            if tool in ("freehand", "paintbrush"):
-                # For freehand/paintbrush, add the first point
+            if tool == "freehand":
                 self.drawing_roi.add_point((x, y))
+            elif tool in ("paintbrush", "eraser"):
+                self.drawing_roi.start_new_stroke((x, y), erase=(tool == "eraser"))
             else:
                 # For other tools, update with start/end (zero size/length)
                 self.drawing_roi.update((x, y), (x, y))
@@ -701,6 +722,8 @@ class ImageWindow(QMainWindow):
                 self.view.camera.interactive = True
 
         if self.drawing_roi:
+            if hasattr(self.drawing_roi, 'end_stroke'):
+                self.drawing_roi.end_stroke()
             self.drawing_roi = None
             self.start_pos = None
 
@@ -757,6 +780,10 @@ class Toolbar(QMainWindow):
         self.act_paintbrush.setCheckable(True)
         self.act_paintbrush.triggered.connect(lambda: self.set_tool("paintbrush"))
 
+        self.act_eraser = QAction("Eraser", self)
+        self.act_eraser.setCheckable(True)
+        self.act_eraser.triggered.connect(lambda: self.set_tool("eraser"))
+
         self.tools.addAction(self.act_pointer)
         self.tools.addAction(self.act_coord)
         self.tools.addAction(self.act_rect)
@@ -764,6 +791,7 @@ class Toolbar(QMainWindow):
         self.tools.addAction(self.act_line)
         self.tools.addAction(self.act_freehand)
         self.tools.addAction(self.act_paintbrush)
+        self.tools.addAction(self.act_eraser)
 
         # ROI Manager Button
         self.tools.addSeparator()
@@ -787,6 +815,7 @@ class Toolbar(QMainWindow):
         group.addAction(self.act_line)
         group.addAction(self.act_freehand)
         group.addAction(self.act_paintbrush)
+        group.addAction(self.act_eraser)
 
         menubar = self.menuBar()
         file_menu = menubar.addMenu("File")

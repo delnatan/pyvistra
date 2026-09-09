@@ -385,15 +385,15 @@ class ROIManager(QWidget):
 
         if not isinstance(roi, PaintbrushROI):
             # Nothing selected in the list - fall back to whichever
-            # paintbrush ROI is currently being painted, so Fill works
-            # right after drawing without an extra selection step.
-            roi = getattr(self.active_window, "active_paintbrush_roi", None)
+            # paintbrush/eraser layer is currently selected on the canvas,
+            # so Fill works right after drawing without an extra
+            # selection step in this list.
+            roi = self.active_window.find_selected_roi(PaintbrushROI)
 
         if not isinstance(roi, PaintbrushROI):
             return
 
-        shape = (self.active_window.Y, self.active_window.X)
-        roi.fill(shape)
+        roi.fill()
         self.select_roi(roi)
         self.active_window.canvas.update()
 
