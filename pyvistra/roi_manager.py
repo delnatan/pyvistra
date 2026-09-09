@@ -377,16 +377,24 @@ class ROIManager(QWidget):
 
     def fill_selected_roi(self):
         """Flood-fill the area enclosed by the selected PaintbrushROI."""
-        item = self.roi_list.currentItem()
-        if not item or not self.active_window:
+        if not self.active_window:
             return
 
-        roi = item.data(Qt.UserRole)
+        item = self.roi_list.currentItem()
+        roi = item.data(Qt.UserRole) if item else None
+
+        if not isinstance(roi, PaintbrushROI):
+            # Nothing selected in the list - fall back to whichever
+            # paintbrush ROI is currently being painted, so Fill works
+            # right after drawing without an extra selection step.
+            roi = getattr(self.active_window, "active_paintbrush_roi", None)
+
         if not isinstance(roi, PaintbrushROI):
             return
 
         shape = (self.active_window.Y, self.active_window.X)
         roi.fill(shape)
+        self.select_roi(roi)
         self.active_window.canvas.update()
 
     def on_item_clicked(self, item):
