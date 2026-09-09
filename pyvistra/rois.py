@@ -1198,12 +1198,18 @@ class PaintbrushROI(ROI):
     Paintbrush ROI for freehand drawing with a circular brush radius.
 
     Stores one or more disconnected strokes, each a sequence of (x, y)
-    points. Each stroke is rendered with its own vispy Line using the
-    'agg' method, which fills the joint between segments properly -
-    unlike a plain thick line strip, which leaves visible notches at
-    sharp corners. Painting again after releasing the mouse continues
-    on this same ROI (see start_new_stroke) rather than creating a new
-    layer.
+    points. Each stroke is rendered as a chain of filled circular stamps
+    (vispy Markers), one stamp per recorded point - not a thick line.
+    A tessellated line (even vispy's antialiased 'agg' method) turned out
+    to produce real rendering bugs on tight, sharp curves (visible gaps,
+    and even disconnected garbage fragments); independent circular stamps
+    have no joint geometry to get wrong, so they can't fail that way.
+    Fast mouse movement is bridged by inserting extra stamps along a big
+    jump (see add_point) so the stroke has no gaps regardless of drawing
+    speed or curve sharpness.
+
+    Painting again after releasing the mouse continues on this same ROI
+    (see start_new_stroke) rather than creating a new layer.
 
     Call fill() to flood-fill the area enclosed by the strokes (or the
     image border), producing a boolean mask that gets saved with the ROI.
@@ -1211,17 +1217,17 @@ class PaintbrushROI(ROI):
 
     _COLOR = (1.0, 0.55, 0.0, 1.0)  # orange
 
-    # Max points held by any one physical Line visual. A stroke longer than
-    # this is split across multiple Lines (sharing a boundary point so they
-    # still look seamless), so re-uploading the active chunk while drawing
-    # stays cheap instead of growing with the whole stroke's length.
+    # Max points held by any one physical Markers visual. A stroke longer
+    # than this is split across multiple visuals, so re-uploading the
+    # active chunk while drawing stays cheap instead of growing with the
+    # whole stroke's length.
     _CHUNK_SIZE = 300
 
     def __init__(self, view, name="Paintbrush", radius=5):
         super().__init__(view, name)
         self.radius = radius
         self.strokes = [[]]  # list of strokes; each stroke is a list of (x, y)
-        self.stroke_chunks = [[]]  # per stroke, list of vispy Lines (chunks)
+        self.stroke_chunks = [[]]  # per stroke, list of vispy Markers (chunks)
         self.mask = None  # Filled boolean (Y, X) array, set by fill()
 
         self._add_chunk_visual(0)
@@ -1237,23 +1243,19 @@ class PaintbrushROI(ROI):
         self.visuals.append(self.mask_visual)
 
     def _add_chunk_visual(self, stroke_idx):
-        line = scene.visuals.Line(
-            pos=np.zeros((0, 2)),
-            color=np.zeros((0, 4)),
-            width=self.radius * 2,
-            connect="strip",
-            method="agg",
+        markers = scene.visuals.Markers(
             parent=self.view.scene,
+            scaling="scene",  # stamp size follows data/image pixels, not screen px
+            method="points",
         )
-        self.stroke_chunks[stroke_idx].append(line)
-        self.visuals.append(line)
+        markers.set_data(pos=np.zeros((0, 2)), size=self.radius * 2, edge_width=0)
+        self.stroke_chunks[stroke_idx].append(markers)
+        self.visuals.append(markers)
 
     def _chunk_point_range(self, chunk_idx, n_pts):
         """Inclusive [start, end] point indices a chunk should hold."""
         start = chunk_idx * self._CHUNK_SIZE
-        end = min(start + self._CHUNK_SIZE, n_pts - 1)
-        if chunk_idx > 0:
-            start -= 1  # share the previous chunk's last point - no seam
+        end = min(start + self._CHUNK_SIZE - 1, n_pts - 1)
         return start, end
 
     def _flatten(self):
@@ -1267,9 +1269,27 @@ class PaintbrushROI(ROI):
         self.add_point(point)
 
     def add_point(self, point):
-        """Add a point to the current (most recent) stroke."""
+        """
+        Add a point to the current (most recent) stroke.
+
+        Backfills intermediate stamps when the mouse moved farther than
+        half the brush radius since the last point, so fast movement
+        doesn't leave gaps between stamps.
+        """
         stroke_idx = len(self.strokes) - 1
-        self.strokes[stroke_idx].append(tuple(point))
+        stroke = self.strokes[stroke_idx]
+        if stroke:
+            last = np.array(stroke[-1])
+            new = np.array(point)
+            dist = np.linalg.norm(new - last)
+            step = max(self.radius / 2, 1)
+            if dist > step:
+                n_steps = min(int(dist // step), 500)
+                for i in range(1, n_steps + 1):
+                    interp = last + (new - last) * (i / (n_steps + 1))
+                    stroke.append(tuple(interp))
+        stroke.append(tuple(point))
+
         self._update_active_chunk(stroke_idx)
         self._update_label_position()
         if self.selected:
@@ -1283,7 +1303,7 @@ class PaintbrushROI(ROI):
         """
         pts = self.strokes[stroke_idx]
         chunks = self.stroke_chunks[stroke_idx]
-        n_chunks_needed = 1 if len(pts) <= 1 else -(-(len(pts) - 1) // self._CHUNK_SIZE)
+        n_chunks_needed = -(-len(pts) // self._CHUNK_SIZE) or 1
         while len(chunks) < n_chunks_needed:
             self._add_chunk_visual(stroke_idx)
 
@@ -1296,26 +1316,27 @@ class PaintbrushROI(ROI):
         Full rebuild of every chunk for a stroke. Used after edits that can
         touch any point (move/adjust/load), not during live drawing.
         """
-        for line in self.stroke_chunks[stroke_idx]:
-            line.parent = None
-            if line in self.visuals:
-                self.visuals.remove(line)
+        for markers in self.stroke_chunks[stroke_idx]:
+            markers.parent = None
+            if markers in self.visuals:
+                self.visuals.remove(markers)
         self.stroke_chunks[stroke_idx] = []
 
         pts = self.strokes[stroke_idx]
-        n_chunks = 1 if len(pts) <= 1 else -(-(len(pts) - 1) // self._CHUNK_SIZE)
+        n_chunks = -(-len(pts) // self._CHUNK_SIZE) or 1
         for c in range(n_chunks):
             self._add_chunk_visual(stroke_idx)
             start, end = self._chunk_point_range(c, len(pts))
             self._set_chunk_data(self.stroke_chunks[stroke_idx][c], pts[start:end + 1])
 
-    def _set_chunk_data(self, line, pts):
-        if len(pts) < 2:
-            line.set_data(pos=np.zeros((0, 2)), color=np.zeros((0, 4)))
+    def _set_chunk_data(self, markers, pts):
+        if len(pts) == 0:
+            markers.set_data(pos=np.zeros((0, 2)), size=self.radius * 2, edge_width=0)
             return
         pos = np.array(pts, dtype=np.float32)
-        colors = np.tile(self._COLOR, (len(pts), 1)).astype(np.float32)
-        line.set_data(pos=pos, color=colors, width=self.radius * 2)
+        markers.set_data(
+            pos=pos, size=self.radius * 2, face_color=self._COLOR, edge_width=0
+        )
 
     def _update_label_position(self):
         # Anchor on the most recent point rather than the geometric midpoint
