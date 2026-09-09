@@ -1211,14 +1211,20 @@ class PaintbrushROI(ROI):
 
     _COLOR = (1.0, 0.55, 0.0, 1.0)  # orange
 
+    # Max points held by any one physical Line visual. A stroke longer than
+    # this is split across multiple Lines (sharing a boundary point so they
+    # still look seamless), so re-uploading the active chunk while drawing
+    # stays cheap instead of growing with the whole stroke's length.
+    _CHUNK_SIZE = 300
+
     def __init__(self, view, name="Paintbrush", radius=5):
         super().__init__(view, name)
         self.radius = radius
         self.strokes = [[]]  # list of strokes; each stroke is a list of (x, y)
-        self.stroke_lines = []  # one vispy Line per stroke, parallel to strokes
+        self.stroke_chunks = [[]]  # per stroke, list of vispy Lines (chunks)
         self.mask = None  # Filled boolean (Y, X) array, set by fill()
 
-        self._add_stroke_visual()
+        self._add_chunk_visual(0)
 
         self.mask_visual = scene.visuals.Image(parent=self.view.scene)
         self.mask_visual.set_gl_state(
@@ -1230,7 +1236,7 @@ class PaintbrushROI(ROI):
         self.mask_visual.visible = False
         self.visuals.append(self.mask_visual)
 
-    def _add_stroke_visual(self):
+    def _add_chunk_visual(self, stroke_idx):
         line = scene.visuals.Line(
             pos=np.zeros((0, 2)),
             color=np.zeros((0, 4)),
@@ -1239,8 +1245,16 @@ class PaintbrushROI(ROI):
             method="agg",
             parent=self.view.scene,
         )
-        self.stroke_lines.append(line)
+        self.stroke_chunks[stroke_idx].append(line)
         self.visuals.append(line)
+
+    def _chunk_point_range(self, chunk_idx, n_pts):
+        """Inclusive [start, end] point indices a chunk should hold."""
+        start = chunk_idx * self._CHUNK_SIZE
+        end = min(start + self._CHUNK_SIZE, n_pts - 1)
+        if chunk_idx > 0:
+            start -= 1  # share the previous chunk's last point - no seam
+        return start, end
 
     def _flatten(self):
         return [p for stroke in self.strokes for p in stroke]
@@ -1248,20 +1262,54 @@ class PaintbrushROI(ROI):
     def start_new_stroke(self, point):
         """Begin a new stroke in this ROI, disconnected from the last one."""
         self.strokes.append([])
-        self._add_stroke_visual()
+        self.stroke_chunks.append([])
+        self._add_chunk_visual(len(self.strokes) - 1)
         self.add_point(point)
 
     def add_point(self, point):
         """Add a point to the current (most recent) stroke."""
-        self.strokes[-1].append(tuple(point))
-        self._update_stroke_visual(len(self.strokes) - 1)
+        stroke_idx = len(self.strokes) - 1
+        self.strokes[stroke_idx].append(tuple(point))
+        self._update_active_chunk(stroke_idx)
         self._update_label_position()
         if self.selected:
             self._update_handles()
 
-    def _update_stroke_visual(self, stroke_idx):
+    def _update_active_chunk(self, stroke_idx):
+        """
+        Cheap incremental update used while actively drawing: only the
+        current (last) chunk is touched, so cost stays bounded by
+        _CHUNK_SIZE regardless of how long the stroke has grown.
+        """
         pts = self.strokes[stroke_idx]
-        line = self.stroke_lines[stroke_idx]
+        chunks = self.stroke_chunks[stroke_idx]
+        n_chunks_needed = 1 if len(pts) <= 1 else -(-(len(pts) - 1) // self._CHUNK_SIZE)
+        while len(chunks) < n_chunks_needed:
+            self._add_chunk_visual(stroke_idx)
+
+        last_idx = len(chunks) - 1
+        start, end = self._chunk_point_range(last_idx, len(pts))
+        self._set_chunk_data(chunks[last_idx], pts[start:end + 1])
+
+    def _rebuild_stroke_visual(self, stroke_idx):
+        """
+        Full rebuild of every chunk for a stroke. Used after edits that can
+        touch any point (move/adjust/load), not during live drawing.
+        """
+        for line in self.stroke_chunks[stroke_idx]:
+            line.parent = None
+            if line in self.visuals:
+                self.visuals.remove(line)
+        self.stroke_chunks[stroke_idx] = []
+
+        pts = self.strokes[stroke_idx]
+        n_chunks = 1 if len(pts) <= 1 else -(-(len(pts) - 1) // self._CHUNK_SIZE)
+        for c in range(n_chunks):
+            self._add_chunk_visual(stroke_idx)
+            start, end = self._chunk_point_range(c, len(pts))
+            self._set_chunk_data(self.stroke_chunks[stroke_idx][c], pts[start:end + 1])
+
+    def _set_chunk_data(self, line, pts):
         if len(pts) < 2:
             line.set_data(pos=np.zeros((0, 2)), color=np.zeros((0, 4)))
             return
@@ -1270,11 +1318,14 @@ class PaintbrushROI(ROI):
         line.set_data(pos=pos, color=colors, width=self.radius * 2)
 
     def _update_label_position(self):
-        pts = self._flatten()
-        if not pts:
-            return
-        mx, my = pts[len(pts) // 2]
-        self.label_visual.pos = (mx, my - 5, 0)
+        # Anchor on the most recent point rather than the geometric midpoint
+        # of every point - avoids an O(total points) flatten on every call,
+        # which would otherwise slow down as a stroke grows longer.
+        for stroke in reversed(self.strokes):
+            if stroke:
+                mx, my = stroke[-1]
+                self.label_visual.pos = (mx, my - 5, 0)
+                return
 
     def _update_handles(self):
         pts = self._flatten()
@@ -1320,7 +1371,7 @@ class PaintbrushROI(ROI):
         dx, dy = delta
         for i, stroke in enumerate(self.strokes):
             self.strokes[i] = [(x + dx, y + dy) for x, y in stroke]
-            self._update_stroke_visual(i)
+            self._rebuild_stroke_visual(i)
         self._update_label_position()
         if self.selected:
             self._update_handles()
@@ -1335,7 +1386,7 @@ class PaintbrushROI(ROI):
         for i, stroke in enumerate(self.strokes):
             if offset < len(stroke):
                 stroke[offset] = tuple(new_pos)
-                self._update_stroke_visual(i)
+                self._rebuild_stroke_visual(i)
                 self._update_label_position()
                 if self.selected:
                     self._update_handles()
@@ -1348,7 +1399,7 @@ class PaintbrushROI(ROI):
         """Update the brush radius and refresh every stroke's width."""
         self.radius = radius
         for i in range(len(self.strokes)):
-            self._update_stroke_visual(i)
+            self._rebuild_stroke_visual(i)
 
     def rasterize(self, shape):
         """
@@ -1467,15 +1518,14 @@ class PaintbrushROI(ROI):
         strokes = data.get("strokes", [[]])
         self.strokes = [[tuple(p) for p in stroke] for stroke in strokes] or [[]]
 
-        for line in self.stroke_lines:
-            line.parent = None
-            if line in self.visuals:
-                self.visuals.remove(line)
-        self.stroke_lines = []
-        for _ in self.strokes:
-            self._add_stroke_visual()
+        for group in self.stroke_chunks:
+            for line in group:
+                line.parent = None
+                if line in self.visuals:
+                    self.visuals.remove(line)
+        self.stroke_chunks = [[] for _ in self.strokes]
         for i in range(len(self.strokes)):
-            self._update_stroke_visual(i)
+            self._rebuild_stroke_visual(i)
         self._update_label_position()
 
         mask_shape = data.get("mask_shape")
