@@ -562,22 +562,23 @@ class ImageWindow(QMainWindow):
                     hit_handle = res
                     break
 
-            # Update Selection
-            for roi in self.rois:
-                roi.select(roi is hit_roi)
-
-            # Notify about selection change
-            self.roi_selection_changed.emit(hit_roi)
-
             if hit_roi:
+                # Update Selection - only when an ROI is actually hit.
+                # Clicking empty canvas (e.g. to pan/zoom with the pointer
+                # tool, which painting/erasing requires switching to)
+                # leaves the current selection alone, so a paintbrush or
+                # freehand layer stays selected - and paintable - across
+                # a pan.
+                for roi in self.rois:
+                    roi.select(roi is hit_roi)
+                self.roi_selection_changed.emit(hit_roi)
+
                 self.dragging_roi = hit_roi
                 self.drag_handle = hit_handle
                 self.last_pos = (x, y)
                 # Disable camera panning while dragging ROI
                 self.view.camera.interactive = False
-                self.canvas.update()
-            else:
-                self.canvas.update()
+            self.canvas.update()
             return
 
         self.start_pos = (x, y)
