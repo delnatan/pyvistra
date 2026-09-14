@@ -1,4 +1,5 @@
 import numpy as np
+from qtkit import Status, set_status, status_label
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QApplication,
@@ -6,12 +7,10 @@ from qtpy.QtWidgets import (
     QDialog,
     QFormLayout,
     QHBoxLayout,
-    QLabel,
     QPushButton,
     QVBoxLayout,
 )
 
-from .. import colors as tokens
 from ..io import coerce_scale_zyx
 from .output_selector import ImageOutputSelector
 
@@ -111,13 +110,11 @@ class FFTDialog(QDialog):
         buttons.addStretch()
         main_layout.addLayout(buttons)
 
-        self.status_label = QLabel("Ready")
-        self.status_label.setStyleSheet(f"color: {tokens.TEXT_FAINT};")
+        self.status_label = status_label("Ready")
         main_layout.addWidget(self.status_label)
 
     def _set_error(self, message):
-        self.status_label.setText(f"Error: {message}")
-        self.status_label.setStyleSheet(f"color: {tokens.DANGER};")
+        set_status(self.status_label, f"Error: {message}", Status.ERROR)
 
     def _compute(self):
         T, Z, C, Y, X = self.viewer.img_data.shape
@@ -132,8 +129,7 @@ class FFTDialog(QDialog):
         x_out = X // 2 + 1 if kind == _KIND_REAL else X
         out_shape = (T, Z, C, Y, x_out)
 
-        self.status_label.setText("Computing...")
-        self.status_label.setStyleSheet(f"color: {tokens.TEXT_FAINT};")
+        set_status(self.status_label, "Computing...", Status.RUNNING)
         self.compute_btn.setEnabled(False)
         QApplication.processEvents()
 
@@ -194,11 +190,9 @@ class FFTDialog(QDialog):
 
             sent = self.output_selector.send(buffer, out_meta)
             if sent is not None:
-                self.status_label.setText("Done")
-                self.status_label.setStyleSheet(f"color: {tokens.SUCCESS};")
+                set_status(self.status_label, "Done", Status.OK)
             else:
-                self.status_label.setText("Computed (output cancelled)")
-                self.status_label.setStyleSheet(f"color: {tokens.TEXT_FAINT};")
+                set_status(self.status_label, "Computed (output cancelled)", Status.NEUTRAL)
         except Exception as exc:
             self._set_error(str(exc))
         finally:

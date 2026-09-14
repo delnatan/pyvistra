@@ -1,4 +1,5 @@
 import numpy as np
+from qtkit import Status, set_status, status_label
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QComboBox,
@@ -6,14 +7,12 @@ from qtpy.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
-    QLabel,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from pyvistra import colors as tokens
 from pyvistra.ui.manager import manager
 
 from .output_selector import ImageOutputSelector
@@ -104,8 +103,7 @@ class ImageMathDialog(QDialog):
         buttons.addStretch()
         main_layout.addLayout(buttons)
 
-        self.status_label = QLabel("Ready")
-        self.status_label.setStyleSheet(f"color: {tokens.TEXT_FAINT};")
+        self.status_label = status_label("Ready")
         main_layout.addWidget(self.status_label)
 
         self._on_operand_changed(self.operand_combo.currentIndex())
@@ -134,8 +132,7 @@ class ImageMathDialog(QDialog):
         self.window_combo.blockSignals(False)
 
     def _set_error(self, message):
-        self.status_label.setText(f"Error: {message}")
-        self.status_label.setStyleSheet(f"color: {tokens.DANGER};")
+        set_status(self.status_label, f"Error: {message}", Status.ERROR)
 
     def _apply(self):
         a = np.asarray(self.viewer.img_data[:]).astype(np.float32, copy=False)
@@ -178,8 +175,6 @@ class ImageMathDialog(QDialog):
 
         sent = self.output_selector.send(buffer, out_meta)
         if sent is not None:
-            self.status_label.setText("Done")
-            self.status_label.setStyleSheet(f"color: {tokens.SUCCESS};")
+            set_status(self.status_label, "Done", Status.OK)
         else:
-            self.status_label.setText("Computed (output cancelled)")
-            self.status_label.setStyleSheet(f"color: {tokens.TEXT_FAINT};")
+            set_status(self.status_label, "Computed (output cancelled)", Status.NEUTRAL)

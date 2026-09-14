@@ -19,17 +19,17 @@ open, and is not persisted into ``layer.style`` or project save/load.
 from __future__ import annotations
 
 import numpy as np
-from qtpy.QtCore import QAbstractTableModel, QModelIndex, Qt
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
-    QAbstractItemView,
     QCheckBox,
     QDockWidget,
     QHBoxLayout,
     QLabel,
-    QTableView,
     QVBoxLayout,
     QWidget,
 )
+
+from qtkit import ColumnTableModel, table_view
 
 from ..data.property_filter import PropertyFilterSpec, SelectionEffect, ranges_from_tuples
 from .color_button import ColorButton
@@ -37,67 +37,31 @@ from .dock_utils import make_dock_float_resize_resilient
 from .property_filter_widget import PropertyFilterWidget, numeric_property_infos
 
 
-class _PropertyTableModel(QAbstractTableModel):
-    """Read-only table over one layer's rows: an id column, base columns
-    (t/x/y/z for points; n_frames for tracks), then one column per property.
-    """
-
-    def __init__(
-        self,
-        ids: np.ndarray,
-        base_columns: dict[str, np.ndarray],
-        properties: dict[str, np.ndarray],
-        parent=None,
-    ):
-        super().__init__(parent)
-        self._columns: list[tuple[str, np.ndarray]] = [("id", np.asarray(ids))]
-        for name, arr in base_columns.items():
-            self._columns.append((name, np.asarray(arr)))
-        for name in sorted(properties):
-            self._columns.append((name, np.asarray(properties[name])))
-        self._n_rows = len(ids)
-
-    def rowCount(self, parent=QModelIndex()) -> int:
-        return 0 if parent.isValid() else self._n_rows
-
-    def columnCount(self, parent=QModelIndex()) -> int:
-        return 0 if parent.isValid() else len(self._columns)
-
-    def data(self, index, role=Qt.DisplayRole):
-        if not index.isValid() or role != Qt.DisplayRole:
-            return None
-        _name, arr = self._columns[index.column()]
-        value = arr[index.row()]
-        if isinstance(value, (np.floating, float)):
-            return f"{float(value):.4g}"
-        if hasattr(value, "item"):
-            value = value.item()
-        return str(value)
-
-    def headerData(self, section, orientation, role=Qt.DisplayRole):
-        if role != Qt.DisplayRole:
-            return None
-        if orientation == Qt.Horizontal:
-            return self._columns[section][0]
-        return str(section + 1)
-
-
-def _rows_from_points(table) -> _PropertyTableModel:
-    base = {"t": table.t, "x": table.x, "y": table.y}
+def _columns_from_points(table) -> dict[str, np.ndarray]:
+    columns: dict[str, np.ndarray] = {
+        "id": np.asarray(table.point_id),
+        "t": table.t,
+        "x": table.x,
+        "y": table.y,
+    }
     if table.z is not None:
-        base["z"] = table.z
-    return _PropertyTableModel(table.point_id, base, table.properties)
+        columns["z"] = table.z
+    for name in sorted(table.properties):
+        columns[name] = table.properties[name]
+    return columns
 
 
-def _rows_from_tracks(table) -> _PropertyTableModel:
-    track_ids = table.track_ids
+def _columns_from_tracks(table) -> dict[str, np.ndarray]:
     n_frames = np.array(
         [sl.stop - sl.start for _, sl in table.iter_track_slices()], dtype=np.int64
     )
     aggregated = {
         name: table.aggregate_property(arr) for name, arr in table.properties.items()
     }
-    return _PropertyTableModel(track_ids, {"n_frames": n_frames}, aggregated)
+    columns: dict[str, np.ndarray] = {"id": np.asarray(table.track_ids), "n_frames": n_frames}
+    for name in sorted(aggregated):
+        columns[name] = aggregated[name]
+    return columns
 
 
 def _selection_properties(layer_type: str, table) -> dict[str, np.ndarray]:
@@ -119,14 +83,12 @@ class PropertyInspectorPanel(QWidget):
 
         table = layer.data.table if layer.layer_type == "points" else layer.data
         available_properties = numeric_property_infos(_selection_properties(layer.layer_type, table))
-        model = _rows_from_points(table) if layer.layer_type == "points" else _rows_from_tracks(table)
+        columns = _columns_from_points(table) if layer.layer_type == "points" else _columns_from_tracks(table)
+        model = ColumnTableModel(columns)
 
         layout = QVBoxLayout(self)
 
-        self.table_view = QTableView()
-        self.table_view.setModel(model)
-        self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table_view.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table_view = table_view(model)
         layout.addWidget(self.table_view, 1)
 
         layout.addWidget(QLabel("Selection"))

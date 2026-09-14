@@ -41,7 +41,10 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from .histogram import TEXT_COLOR, WIDGET_BG
+from .. import colors as tokens
+
+WIDGET_BG = QColor(tokens.BG_ELEVATED)
+TEXT_COLOR = QColor(tokens.TEXT_PRIMARY)
 
 FALLBACK_COLORS = [
     "#66CCFF",

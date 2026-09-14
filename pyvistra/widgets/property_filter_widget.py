@@ -7,9 +7,9 @@ plain-tuple shape :func:`~pyvistra.data.property_filter.ranges_from_tuples`
 coerces into a :class:`~pyvistra.data.property_filter.PropertyFilterSpec`.
 
 Each row also renders the property's distribution with
-:class:`~pyvistra.widgets.histogram.CompactHistogramWidget` — the same
-draggable-handle histogram the channel-adjustment panel uses for contrast —
-so picking a range is population-level inspection, not blind spinbox entry.
+:class:`qtkit.HistogramCanvas` — the same draggable-handle histogram the
+channel-adjustment panel uses for contrast — so picking a range is
+population-level inspection, not blind spinbox entry.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
+from qtkit import HistogramCanvas
 from qtpy.QtCore import Signal
 from qtpy.QtWidgets import (
     QCheckBox,
@@ -29,7 +30,6 @@ from qtpy.QtWidgets import (
 )
 
 from .. import colors as tokens
-from .histogram import CompactHistogramWidget
 
 _HISTOGRAM_COLOR = tokens.ACCENT
 
@@ -117,7 +117,8 @@ class _FilterRow(QWidget):
         self.min_spin.setRange(-1e12, 1e12)
         self.min_spin.setDecimals(4)
 
-        self.histogram = CompactHistogramWidget()
+        self.histogram = HistogramCanvas()
+        self.histogram.setMaximumHeight(50)
 
         self.no_max = QCheckBox("No Max")
         self.max_spin = QDoubleSpinBox()
@@ -135,14 +136,14 @@ class _FilterRow(QWidget):
         self.no_max.toggled.connect(self._on_no_max_toggled)
         self.min_spin.valueChanged.connect(lambda _: self._sync_histogram_clim())
         self.max_spin.valueChanged.connect(lambda _: self._sync_histogram_clim())
-        self.histogram.climChanged.connect(self._on_histogram_clim_changed)
+        self.histogram.rangeChanged.connect(self._on_histogram_clim_changed)
         self.property_combo.currentIndexChanged.connect(lambda _: self._on_property_changed())
 
         self.no_min.toggled.connect(self.rangeChanged)
         self.no_max.toggled.connect(self.rangeChanged)
         self.min_spin.valueChanged.connect(self.rangeChanged)
         self.max_spin.valueChanged.connect(self.rangeChanged)
-        self.histogram.climChanged.connect(self.rangeChanged)
+        self.histogram.rangeChanged.connect(self.rangeChanged)
         self.property_combo.currentIndexChanged.connect(self.rangeChanged)
 
         name, min_value, max_value = (
@@ -169,7 +170,8 @@ class _FilterRow(QWidget):
         self.min_spin.setSingleStep(step)
         self.max_spin.setSingleStep(step)
         if info.values is not None:
-            self.histogram.set_data(info.values, _HISTOGRAM_COLOR)
+            self.histogram.set_data(info.values)
+            self.histogram.set_color(_HISTOGRAM_COLOR)
         self._sync_histogram_clim()
 
     def _effective_min(self) -> float:
@@ -186,7 +188,7 @@ class _FilterRow(QWidget):
 
     def _sync_histogram_clim(self):
         self.histogram.blockSignals(True)
-        self.histogram.set_clim(self._effective_min(), self._effective_max())
+        self.histogram.set_range(self._effective_min(), self._effective_max())
         self.histogram.blockSignals(False)
         self.histogram.update()
 
@@ -202,7 +204,7 @@ class _FilterRow(QWidget):
         # Only clear "unbounded" on the side actually being dragged — a
         # center-drag (both handles) clears both, but dragging just the
         # max handle shouldn't silently bound an unrelated unbounded min.
-        dragging = self.histogram._dragging
+        dragging = self.histogram.dragging()
         if dragging in ("min", "center"):
             self.no_min.setChecked(False)
         if dragging in ("max", "center"):

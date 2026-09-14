@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 
 import numpy as np
-from qtpy.QtCore import QEvent, QPoint, QRect, QSize, Qt
+from qtpy.QtCore import QEvent, QSize, Qt
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -19,8 +19,6 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
-    QLayout,
-    QLayoutItem,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -31,8 +29,8 @@ from qtpy.QtWidgets import (
     QSpinBox,
     QVBoxLayout,
     QWidget,
-    QWidgetItem,
 )
+from qtkit import FlowLayout
 from superqt import QRangeSlider
 from vispy import scene
 
@@ -415,102 +413,6 @@ class TiledChannelPanel(QWidget):
             self._display_unsubscribe()
             self._display_unsubscribe = None
         super().closeEvent(event)
-
-
-class FlowLayout(QLayout):
-    """
-    Layout that arranges widgets in a flowing left-to-right, top-to-bottom manner.
-    Similar to CSS flexbox with wrap.
-    """
-
-    def __init__(self, parent=None, spacing=8):
-        super().__init__(parent)
-        self._items = []
-        self._spacing = spacing
-
-    def addItem(self, item):
-        self._items.append(item)
-
-    def count(self):
-        return len(self._items)
-
-    def itemAt(self, index):
-        if 0 <= index < len(self._items):
-            return self._items[index]
-        return None
-
-    def takeAt(self, index):
-        if 0 <= index < len(self._items):
-            return self._items.pop(index)
-        return None
-
-    def expandingDirections(self):
-        return Qt.Orientations()
-
-    def hasHeightForWidth(self):
-        return True
-
-    def heightForWidth(self, width):
-        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
-
-    def setGeometry(self, rect):
-        super().setGeometry(rect)
-        self._do_layout(rect, test_only=False)
-
-    def sizeHint(self):
-        return self.minimumSize()
-
-    def minimumSize(self):
-        size = QSize()
-        for item in self._items:
-            size = size.expandedTo(item.minimumSize())
-        margin = self.contentsMargins()
-        size += QSize(
-            margin.left() + margin.right(), margin.top() + margin.bottom()
-        )
-        return size
-
-    def _do_layout(self, rect, test_only=False):
-        """Arrange items in flow layout within given rect."""
-        left, top, right, bottom = self.getContentsMargins()
-        effective_rect = rect.adjusted(left, top, -right, -bottom)
-
-        x = effective_rect.x()
-        y = effective_rect.y()
-        line_height = 0
-
-        for item in self._items:
-            widget = item.widget()
-            if widget is None:
-                continue
-
-            space_x = self._spacing
-            space_y = self._spacing
-
-            item_width = widget.sizeHint().width()
-            item_height = widget.sizeHint().height()
-
-            next_x = x + item_width + space_x
-
-            # Wrap to next row if exceeded width
-            if (
-                next_x - space_x > effective_rect.right() + 1
-                and line_height > 0
-            ):
-                x = effective_rect.x()
-                y = y + line_height + space_y
-                next_x = x + item_width + space_x
-                line_height = 0
-
-            if not test_only:
-                widget.setGeometry(
-                    QRect(QPoint(x, y), QSize(item_width, item_height))
-                )
-
-            x = next_x
-            line_height = max(line_height, item_height)
-
-        return y + line_height - rect.y() + bottom
 
 
 class TileWidget(QFrame):

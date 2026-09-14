@@ -27,6 +27,7 @@ dependencies = [
     "scipy",
     "pyopengl>=3.1.10",
     "scikit-image>=0.26.0",
+    "qtkit",
 ]
 
 [project.optional-dependencies]
@@ -40,3 +41,6 @@ pyvistra = "pyvistra.__main__:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["pyvistra*"]
+
+[tool.uv.sources]
+qtkit = { path = "../qtkit", editable = true }

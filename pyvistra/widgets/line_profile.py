@@ -26,11 +26,13 @@ from qtpy.QtWidgets import (
 from .. import colors as tokens
 from ..data import calibration
 from ..data.calibration import window_is_frequency_space
-from .histogram import WIDGET_BG, TEXT_COLOR
 from .series_colors import _to_qcolor
 from .window_series_mixin import WindowSeriesMixin
 from ..ui.comparison import paired_window
 from ..ui.manager import manager
+
+WIDGET_BG = QColor(tokens.BG_ELEVATED)
+TEXT_COLOR = QColor(tokens.TEXT_PRIMARY)
 
 # Singleton instance
 _line_profile_dialog = None

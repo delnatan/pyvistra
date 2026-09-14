@@ -33,15 +33,12 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from qtkit import HistogramCanvas, configure_spinbox_for_range
+
 from pyvistra import colormaps as _colormaps
 from pyvistra import colors as tokens
 from pyvistra.contrast import compute_percentile_clim
 from .dock_utils import make_dock_float_resize_resilient
-from .histogram import (
-    CompactHistogramWidget,
-    configure_spinbox_for_range,
-    get_safe_contrast_bounds,
-)
 
 _MENU_ICON_SIZE = QSize(64, 16)
 _SWATCH_ICON_SIZE = QSize(18, 18)
@@ -50,6 +47,29 @@ _MENU_ICON_QSS = (
     f"QMenu::item {{ icon-size: {_MENU_ICON_SIZE.width()}px "
     f"{_MENU_ICON_SIZE.height()}px; }}"
 )
+
+
+def get_safe_contrast_bounds(dtype, data_min, data_max):
+    """Safe min/max bounds for contrast spinboxes.
+
+    Integer data uses the full dtype range (safe hard limits); float data
+    uses a wider range around the observed data to allow exploration.
+    """
+    np_dtype = np.dtype(dtype)
+
+    if np.issubdtype(np_dtype, np.integer):
+        info = np.iinfo(np_dtype)
+        return float(info.min), float(info.max)
+
+    if np.issubdtype(np_dtype, np.bool_):
+        return 0.0, 1.0
+
+    span = float(data_max - data_min)
+    if span <= 0:
+        span = max(abs(float(data_max)), abs(float(data_min)), 1.0)
+
+    margin = span * 10.0
+    return float(data_min - margin), float(data_max + margin)
 
 
 def _colormap_icon(cmap_name, size=_MENU_ICON_SIZE, samples=32):
@@ -153,8 +173,12 @@ class ChannelRow(QWidget):
         self.min_spin.valueChanged.connect(self._on_min_changed)
         bottom_row.addWidget(self.min_spin)
 
-        self.histogram = CompactHistogramWidget()
-        self.histogram.climChanged.connect(self._on_histogram_clim_changed)
+        self.histogram = HistogramCanvas()
+        # Keeps the row compact when stacked in ChannelPanel's QVBoxLayout;
+        # qtkit's own minimum-width floor already covers the "shrinks to
+        # zero in a narrow dock" failure this row is prone to.
+        self.histogram.setMaximumHeight(50)
+        self.histogram.rangeChanged.connect(self._on_histogram_clim_changed)
         bottom_row.addWidget(self.histogram, 1)
 
         self.max_spin = QDoubleSpinBox()
@@ -180,7 +204,7 @@ class ChannelRow(QWidget):
         if value < max_val:
             self.climChanged.emit(self.channel_idx, value, max_val)
             self.histogram.blockSignals(True)
-            self.histogram.set_clim(value, max_val)
+            self.histogram.set_range(value, max_val)
             self.histogram.blockSignals(False)
 
     def _on_max_changed(self, value):
@@ -188,7 +212,7 @@ class ChannelRow(QWidget):
         if value > min_val:
             self.climChanged.emit(self.channel_idx, min_val, value)
             self.histogram.blockSignals(True)
-            self.histogram.set_clim(min_val, value)
+            self.histogram.set_range(min_val, value)
             self.histogram.blockSignals(False)
 
     def _on_histogram_clim_changed(self, vmin, vmax):
@@ -229,10 +253,10 @@ class ChannelRow(QWidget):
 
     def set_data(self, data_slice, color):
         """Update histogram data."""
-        self.histogram.set_data(data_slice, color)
+        self.histogram.set_data(data_slice)
+        self.histogram.set_color(color)
 
-        data_min = self.histogram.data_min
-        data_max = self.histogram.data_max
+        data_min, data_max = self.histogram.data_range()
         configure_spinbox_for_range(self.min_spin, data_min, data_max)
         configure_spinbox_for_range(self.max_spin, data_min, data_max)
         dtype = self.data_dtype if self.data_dtype is not None else data_slice.dtype
@@ -245,7 +269,7 @@ class ChannelRow(QWidget):
         self.histogram.blockSignals(True)
         self.min_spin.blockSignals(True)
         self.max_spin.blockSignals(True)
-        self.histogram.set_clim(vmin, vmax)
+        self.histogram.set_range(vmin, vmax)
         self.min_spin.setValue(vmin)
         self.max_spin.setValue(vmax)
         self.histogram.blockSignals(False)
@@ -441,8 +465,7 @@ class ChannelPanel(QWidget):
             cmap_name = self.viewer.renderer.get_colormap_name(channel_idx)
             row.current_colormap = cmap_name
             row._update_color_swatch(cmap_name)
-            row.histogram.color = QColor(self._swatch_color(channel_idx))
-            row.histogram.update()
+            row.histogram.set_color(QColor(self._swatch_color(channel_idx)))
         elif field == "visible":
             row.set_visible_state(
                 self.viewer.renderer.get_channel_visible(channel_idx)

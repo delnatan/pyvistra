@@ -1,4 +1,5 @@
 import numpy as np
+from qtkit import Status, set_status, status_label
 from qtpy.QtCore import QObject, Qt, Signal
 from qtpy.QtWidgets import (
     QComboBox,
@@ -12,7 +13,6 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
 )
 
-from pyvistra import colors as tokens
 from pyvistra.io import build_z_projection_metadata
 
 from .output_selector import ImageOutputSelector
@@ -159,8 +159,7 @@ class ZProjectionDialog(QDialog):
         self.progress_bar.setValue(0)
         main_layout.addWidget(self.progress_bar)
 
-        self.status_label = QLabel("Ready")
-        self.status_label.setStyleSheet(f"color: {tokens.TEXT_FAINT};")
+        self.status_label = status_label("Ready")
         main_layout.addWidget(self.status_label)
 
         buttons = QHBoxLayout()
@@ -203,10 +202,11 @@ class ZProjectionDialog(QDialog):
         z_start = int(self.z_start_spin.value())
         z_end = int(self.z_end_spin.value())
         if z_start < 0 or z_end >= Z:
-            self.status_label.setText(
-                f"Invalid Z range: {z_start}-{z_end} (valid: 0-{Z - 1})"
+            set_status(
+                self.status_label,
+                f"Invalid Z range: {z_start}-{z_end} (valid: 0-{Z - 1})",
+                Status.ERROR,
             )
-            self.status_label.setStyleSheet(f"color: {tokens.DANGER};")
             return
 
         method = str(self.method_combo.currentData())
@@ -233,13 +233,14 @@ class ZProjectionDialog(QDialog):
         self.progress_bar.setValue(0)
 
         if self._runner.output_type == "file":
-            self.status_label.setText(
-                f"Running Z projection to file... 0/{total}"
+            set_status(
+                self.status_label,
+                f"Running Z projection to file... 0/{total}",
+                Status.RUNNING,
             )
         else:
-            self.status_label.setText(f"Running Z projection... 0/{total}")
+            set_status(self.status_label, f"Running Z projection... 0/{total}", Status.RUNNING)
 
-        self.status_label.setStyleSheet(f"color: {tokens.TEXT_FAINT};")
         self.start_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
 
@@ -256,8 +257,7 @@ class ZProjectionDialog(QDialog):
     def _cancel(self):
         if self._runner.worker is not None:
             self._runner.cancel()
-            self.status_label.setText("Cancelling after current projection...")
-            self.status_label.setStyleSheet(f"color: {tokens.WARNING};")
+            set_status(self.status_label, "Cancelling after current projection...", Status.CAUTION)
             self.cancel_btn.setEnabled(False)
 
     def _on_progress(self, done, total):
@@ -268,27 +268,22 @@ class ZProjectionDialog(QDialog):
         if self._runner.output_type == "file":
             result = self._runner.finalize_output()
             if result:
-                self.status_label.setText(f"Completed: saved to {result}")
-                self.status_label.setStyleSheet(f"color: {tokens.SUCCESS};")
+                set_status(self.status_label, f"Completed: saved to {result}", Status.OK)
             else:
-                self.status_label.setText("Completed (save cancelled)")
-                self.status_label.setStyleSheet(f"color: {tokens.WARNING};")
+                set_status(self.status_label, "Completed (save cancelled)", Status.CAUTION)
         else:
-            self.status_label.setText("Completed")
-            self.status_label.setStyleSheet(f"color: {tokens.SUCCESS};")
+            set_status(self.status_label, "Completed", Status.OK)
 
         self.start_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
 
     def _on_cancelled(self):
-        self.status_label.setText("Cancelled (partial result kept in buffer)")
-        self.status_label.setStyleSheet(f"color: {tokens.WARNING};")
+        set_status(self.status_label, "Cancelled (partial result kept in buffer)", Status.CAUTION)
         self.start_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
 
     def _on_error(self, message):
-        self.status_label.setText(f"Error: {message}")
-        self.status_label.setStyleSheet(f"color: {tokens.DANGER};")
+        set_status(self.status_label, f"Error: {message}", Status.ERROR)
         self.start_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
 
