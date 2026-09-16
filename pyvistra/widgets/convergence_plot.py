@@ -71,6 +71,11 @@ def _to_qcolor(spec, default):
 class ConvergencePlotWidget(QWidget):
     """Embeddable iteration-history plot (log-y by default).
 
+    Log-y is a preference, applied per axis: an axis holding any value
+    <= 0 (e.g. a negative log-likelihood loss) is drawn linear instead,
+    since those values have no position on a log scale. No finite value is
+    ever dropped from the plot.
+
     Series are stored in insertion order. Calling :meth:`set_series` with
     an existing label updates that series in place (cheap repaint, no
     flicker), which is the canonical pattern during live iteration.
@@ -206,14 +211,14 @@ class ConvergencePlotWidget(QWidget):
         return x, y, max(1, w), max(1, h)
 
     def _axis_range(self, items):
-        """(y_min, y_max, log_y_min, log_y_max) spanning ``items``' values."""
+        """(y_min, y_max, log_y_min, log_y_max) spanning ``items``' finite
+        values. ``log_y_min``/``log_y_max`` are None when the axis is drawn
+        linear: log-y is off, or some value is <= 0 (see class docstring).
+        """
         all_finite = []
         for _, s in items:
             v = np.asarray(s["values"], dtype=float)
-            if self._y_log:
-                v = v[np.isfinite(v) & (v > 0)]
-            else:
-                v = v[np.isfinite(v)]
+            v = v[np.isfinite(v)]
             if v.size:
                 all_finite.append(v)
         if all_finite:
@@ -223,7 +228,7 @@ class ConvergencePlotWidget(QWidget):
         else:
             y_min, y_max = 1e-6, 1.0
 
-        if self._y_log:
+        if self._y_log and y_min > 0:
             y_min = max(y_min, 1e-300)
             if y_max <= y_min:
                 y_max = y_min * 10.0
@@ -287,7 +292,7 @@ class ConvergencePlotWidget(QWidget):
         return plot_x + (x_val - x_min) / (x_max - x_min) * plot_w
 
     def _y_to_px(self, y_val, y_min, y_max, plot_y, plot_h, log_y_min, log_y_max):
-        if self._y_log:
+        if log_y_min is not None:
             if y_val <= 0 or not np.isfinite(y_val):
                 return None
             r = (np.log10(y_val) - log_y_min) / (log_y_max - log_y_min)
@@ -307,7 +312,7 @@ class ConvergencePlotWidget(QWidget):
             text_x, text_w = int(plot_x + plot_w + 4), self.margin_right_axis - 6
             align = Qt.AlignLeft | Qt.AlignVCenter
 
-        if self._y_log:
+        if log_y_min is not None:
             n_ticks = 4
             for i in range(n_ticks + 1):
                 v_log = log_y_min + (i / n_ticks) * (log_y_max - log_y_min)
