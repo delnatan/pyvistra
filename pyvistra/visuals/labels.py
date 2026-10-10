@@ -70,7 +70,8 @@ class LabelOverlayVisual:
         )
 
         # Label ID lookup map (for cursor queries)
-        self._label_map = np.zeros(shape_yx, dtype=np.uint16)
+        # uint32: label IDs above 65535 (large segmentations) must not wrap.
+        self._label_map = np.zeros(shape_yx, dtype=np.uint32)
 
         # Create Image visual for the overlay
         self._image = scene.visuals.Image(

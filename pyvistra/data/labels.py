@@ -348,16 +348,31 @@ class SparseLabels:
 
     # ---- Conversion ----
 
-    def to_dense(self, dtype: type = np.uint16) -> np.ndarray:
+    def to_dense(self, dtype: type | None = None) -> np.ndarray:
         """
         Convert to dense label array.
 
         Args:
-            dtype: Output dtype (default uint16)
+            dtype: Output dtype. Default: uint16 when every label fits,
+                otherwise the smallest unsigned type that does.
 
         Returns:
             Dense label array of shape self.shape
+
+        Raises:
+            ValueError: If an explicit integer ``dtype`` can't hold the
+                largest label (it would silently wrap onto other labels).
         """
+        max_label = max(self._objects, default=0)
+        if dtype is None:
+            dtype = next(
+                t for t in (np.uint16, np.uint32, np.uint64)
+                if max_label <= np.iinfo(t).max
+            )
+        elif np.issubdtype(dtype, np.integer) and max_label > np.iinfo(dtype).max:
+            raise ValueError(
+                f"Label {max_label} does not fit in {np.dtype(dtype).name}"
+            )
         out = np.zeros(self._shape, dtype=dtype)
         for label, arr in self._objects.items():
             coords = tuple(arr[i] for i in range(arr.shape[0]))

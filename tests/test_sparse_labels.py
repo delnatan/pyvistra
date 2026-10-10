@@ -33,3 +33,17 @@ def test_merge_into_member_label_and_fresh_label():
     labels = _labels_with((1, ([0], [0])), (2, ([1], [1])))
     assert labels.merge([1, 2], new_label=7) == 7
     assert labels.labels == [7] and labels.area(7) == 2
+
+
+def test_to_dense_does_not_wrap_large_label_ids():
+    """Regression: to_dense() defaulted to uint16, so label 65537 came out
+    as 1 -- silently merged with a different object."""
+    labels = _labels_with((1, ([0], [0])), (65537, ([1], [1])))
+
+    dense = labels.to_dense()
+
+    assert dense.dtype == np.uint32
+    assert dense[0, 0] == 1 and dense[1, 1] == 65537
+    assert _labels_with((7, ([0], [0]))).to_dense().dtype == np.uint16  # unchanged default
+    with pytest.raises(ValueError, match="does not fit"):
+        labels.to_dense(np.uint16)
