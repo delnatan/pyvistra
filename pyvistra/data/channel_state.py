@@ -11,7 +11,7 @@ This module is pure data: no Qt, no vispy. The display color for a
 channel is derived from its colormap name via the colormap registry.
 """
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 
 from .. import colormaps as _colormaps
 

@@ -7,7 +7,6 @@ memory, enabling lazy access to large files.
 """
 
 import numpy as np
-import zarr
 
 
 # ---------------------------------------------------------------------------

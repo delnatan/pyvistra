@@ -22,7 +22,7 @@ Usage
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Tuple
 
 from qtpy.QtCore import Signal
 from qtpy.QtWidgets import (

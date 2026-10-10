@@ -13,7 +13,6 @@ from io import StringIO
 
 from qtpy.QtCore import Qt, Signal
 from qtpy.QtGui import (
-    QFont,
     QFontDatabase,
     QFontMetrics,
     QKeyEvent,

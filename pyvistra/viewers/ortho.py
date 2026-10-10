@@ -11,7 +11,6 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 from vispy import scene
-from vispy.visuals.transforms import STTransform
 
 from .. import colors as tokens
 from ..visuals.overlays import ScaleTimestampOverlay

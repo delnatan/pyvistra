@@ -2,7 +2,6 @@
 Axes reordering dialog for ambiguous TIFF dimensions.
 """
 
-from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QComboBox,
     QDialog,

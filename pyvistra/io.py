@@ -2,7 +2,6 @@ import os
 import re
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import numpy as np
 import tifffile

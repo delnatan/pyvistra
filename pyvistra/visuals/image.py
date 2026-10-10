@@ -3,7 +3,7 @@ from vispy import scene
 from vispy.visuals.transforms.linear import MatrixTransform, STTransform
 
 from .. import colormaps as _colormaps
-from ..data.channel_state import ChannelDisplayList, ChannelDisplayState
+from ..data.channel_state import ChannelDisplayList
 
 # Default channel colormaps (original microscope colors)
 DEFAULT_CHANNEL_COLORMAPS = [

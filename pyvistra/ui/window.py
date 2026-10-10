@@ -2,7 +2,6 @@ import html
 import os
 import sys
 from collections import OrderedDict
-from datetime import datetime
 
 import numpy as np
 from qtpy import API_NAME
@@ -52,7 +51,6 @@ from ..data.shapes import (
     AddShape,
     RemoveShape,
     MoveShape,
-    AdjustHandle,
     AddVertex,
     RemoveVertex,
     SetPolylineFlags,

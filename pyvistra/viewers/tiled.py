@@ -24,7 +24,6 @@ from qtpy.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QSlider,
     QSpinBox,
     QVBoxLayout,
@@ -34,7 +33,6 @@ from qtkit import FlowLayout
 from superqt import QRangeSlider
 from vispy import scene
 
-from .. import colormaps as _colormaps
 from .. import colors as tokens
 from ..contrast import compute_percentile_clim
 from ..data.annotations import TileAnnotations
@@ -45,7 +43,6 @@ from ..io import load_image
 from ..visuals.image import (
     DEFAULT_CHANNEL_COLORMAPS,
     CompositeImageVisual,
-    get_colormap,
 )
 from ..widgets import ChannelPanel, ChannelRow, show_channel_dock
 from ..widgets.annotation_stats_panel import AnnotationStatsPanel

@@ -16,7 +16,6 @@ from vispy.visuals.transforms import STTransform
 from .. import colormaps as _colormaps
 from ..data.channel_state import ChannelDisplayList
 from ..visuals.image import (
-    DEFAULT_CHANNEL_COLORMAPS,
     default_channel_colormap,
     get_colormap,
 )

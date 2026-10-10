@@ -244,10 +244,6 @@ class AlignmentDialog(QDialog):
 
         # Create overlay layers in reference window
         from vispy import scene
-        from vispy.visuals.transforms.linear import (
-            MatrixTransform,
-            STTransform,
-        )
 
         opacity = self.opacity_slider.value() / 100.0
 
