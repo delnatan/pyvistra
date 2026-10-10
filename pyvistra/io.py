@@ -1286,7 +1286,7 @@ def load_sparse_labels(path):
     Returns:
         SparseLabels instance
     """
-    from .labels import SparseLabels
+    from .data.labels import SparseLabels
 
     return SparseLabels.from_file(path)
 

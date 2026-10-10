@@ -106,8 +106,8 @@ class ImageBuffer(RefCountMixin):
         return _unsubscribe
 
     def save_as(self, filepath):
-        """Export buffer contents to OME-TIFF."""
-        from .io import save_tiff
+        """Export buffer contents to an ImageJ-hyperstack TIFF."""
+        from ..io import save_tiff
         scale = self.metadata.get("scale", (1.0, 1.0, 1.0))
         save_tiff(filepath, self._store[:], scale=scale, metadata=self.metadata)
 
