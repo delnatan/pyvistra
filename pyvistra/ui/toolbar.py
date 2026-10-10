@@ -1,6 +1,7 @@
 """Main toolbar with drag-and-drop support for pyvistra."""
 
 import os
+import traceback
 
 from natsort import natsort_key
 from qtpy.QtCore import QObject, QSize, Qt, QThread, Signal
@@ -50,7 +51,11 @@ class _ImageLoadWorker(QObject):
         try:
             data, meta = load_image(self.filepath, load_mode=self.load_mode)
         except Exception as e:
-            self.error.emit(str(e), self.filepath, self)
+            self.error.emit(
+                f"{type(e).__name__}: {e}\n\n{traceback.format_exc()}",
+                self.filepath,
+                self,
+            )
             return
         self.finished.emit(data, meta, self.filepath, self)
 
@@ -511,12 +516,36 @@ class Toolbar(QMainWindow):
         self._update_loading_indicator()
         try:
             viewer = ImageWindow(data, meta=meta, filepath=filepath)
-            present_window(viewer)
-            self._track_window(viewer)
         except Exception as e:
-            print(f"Error opening {filepath}: {e}")
+            # The window never took over the loaded data; close its file.
+            if hasattr(data, "release"):
+                data.release()
+            self._report_open_error(
+                filepath, f"{type(e).__name__}: {e}\n\n{traceback.format_exc()}"
+            )
+            return
+        present_window(viewer)
+        self._track_window(viewer)
 
     def _on_image_load_error(self, message, filepath, worker):
         self._pending_loads.pop(worker, None)
         self._update_loading_indicator()
-        print(f"Error opening {filepath}: {message}")
+        self._report_open_error(filepath, message)
+
+    def _report_open_error(self, filepath, details):
+        """Tell the user a file couldn't be opened (non-blocking dialog).
+
+        ``details`` is "<ExceptionType>: <message>" followed by the
+        traceback; the first line is shown, the rest is behind "Show
+        Details..." for bug reports.
+        """
+        summary, _, trace = details.partition("\n\n")
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("Could Not Open File")
+        box.setText(f"Could not open {os.path.basename(filepath.rstrip('/'))}")
+        box.setInformativeText(summary)
+        if trace:
+            box.setDetailedText(f"{filepath}\n\n{trace}")
+        box.setAttribute(Qt.WA_DeleteOnClose)
+        box.open()

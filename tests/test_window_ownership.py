@@ -17,6 +17,24 @@ from pyvistra.data.buffer import ImageBuffer
 from pyvistra.data.proxies import Numpy5DProxy
 
 
+_APP = None
+
+
+def _app():
+    """The QApplication, created like imshow() would if no test made one
+    yet (Toolbar tests construct widgets directly)."""
+    from qtpy.QtCore import Qt
+
+    global _APP
+    app = QApplication.instance()
+    if app is None:
+        QApplication.setAttribute(Qt.AA_ShareOpenGLContexts, True)
+        # Module-level reference: a QApplication whose wrapper is
+        # garbage-collected takes the native app down with it.
+        app = _APP = QApplication([])
+    return app
+
+
 def _flush_deletes():
     app = QApplication.instance()
     for _ in range(3):
@@ -51,6 +69,7 @@ def test_toolbar_forgets_closed_windows():
     pinning each closed window's image data in memory for the session."""
     from pyvistra.ui.toolbar import Toolbar
 
+    _app()
     toolbar = Toolbar()
     data = Numpy5DProxy(np.zeros((1, 1, 1, 16, 16), np.uint16))
     data_ref = weakref.ref(data)
@@ -80,8 +99,39 @@ def test_window_title_shows_small_pixel_sizes(tmp_path):
     )
     from pyvistra.ui.window import ImageWindow
 
+    _app()
     win = ImageWindow(str(path))
     try:
         assert "[0.065 x 0.065 µm]" in win.windowTitle()
     finally:
         win.close()
+
+
+def test_toolbar_reports_unopenable_file_in_a_dialog(tmp_path):
+    """Regression: a file that failed to open only printed to the
+    terminal, so a GUI user saw nothing happen."""
+    import time
+
+    from qtpy.QtWidgets import QMessageBox
+
+    from pyvistra.ui.toolbar import Toolbar
+
+    bad = tmp_path / "broken.tif"
+    bad.write_bytes(b"not a tiff")
+    app = _app()
+    toolbar = Toolbar()
+    try:
+        toolbar.spawn_viewer(str(bad))
+        deadline = time.time() + 5
+        boxes = []
+        while not boxes and time.time() < deadline:
+            app.processEvents()
+            boxes = [b for b in toolbar.findChildren(QMessageBox) if b.isVisible()]
+            time.sleep(0.01)
+
+        assert boxes, "no error dialog shown"
+        assert "broken.tif" in boxes[0].text()
+        assert toolbar.open_windows == []
+        assert not toolbar._pending_loads  # loading indicator cleared
+    finally:
+        toolbar.close()
