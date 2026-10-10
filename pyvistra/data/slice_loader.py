@@ -45,6 +45,9 @@ class SliceLoader:
         self._pending = None  # latest requested key not yet loading
         self._prefetch = []  # neighbour keys, loaded when idle
         self._current = None  # last requested key: eviction-protected
+        # Bumped by invalidate(). A load that started under an older
+        # generation read pre-invalidation contents and must not be cached.
+        self._generation = 0
         self._closed = False
         self._thread = threading.Thread(
             target=self._run, name="pyvistra-slice-loader", daemon=True
@@ -93,10 +96,15 @@ class SliceLoader:
             return self._cache.get(self.key_for(t, z))
 
     def invalidate(self):
-        """Drop every cached plane (call when source contents change)."""
+        """Drop every cached plane (call when source contents change).
+
+        Also voids any load already in flight: it may have read the source
+        before the change, and caching it would resurrect stale pixels.
+        """
         with self._lock:
             self._cache.clear()
             self._cache_nbytes = 0
+            self._generation += 1
 
     def close(self):
         """Stop the worker thread. Idempotent; pending work is dropped."""
@@ -128,12 +136,20 @@ class SliceLoader:
                     key, deliver = self._prefetch.pop(0), False
                     if key in self._cache:
                         continue
+                generation = self._generation
 
             plane = self._load(key)
 
             with self._lock:
                 if self._closed:
                     return
+                if generation != self._generation:
+                    # Source changed mid-read: drop the plane. A requested
+                    # frame is retried (unless a newer request superseded
+                    # it); a prefetch is simply skipped.
+                    if deliver and self._pending is None:
+                        self._pending = key
+                    continue
                 if plane is not None:
                     self._store(key, plane)
                 # A newer request arrived while loading: don't deliver

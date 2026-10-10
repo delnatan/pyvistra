@@ -156,3 +156,65 @@ def test_out_of_bounds_request_is_swallowed(loader_pair):
     # worker still functional afterwards
     loader.request(0, 0)
     assert col.wait()
+
+
+class GatedSource(SlowSource):
+    """Blocks reads of ``gate_t`` until released, so a test can mutate the
+    data while that read is provably in flight."""
+
+    def __init__(self, gate_t):
+        super().__init__()
+        self.gate_t = gate_t
+        self.reading = threading.Event()
+        self.release = threading.Event()
+
+    def __getitem__(self, key):
+        out = self.data[key].copy()  # snapshot = what the read observed
+        if key[0] == self.gate_t:
+            self.reading.set()
+            assert self.release.wait(2.0)
+        return out
+
+
+def test_invalidate_voids_in_flight_prefetch():
+    """Regression: a prefetch that read t=1 before a write to t=1 landed
+    after invalidate() and cached the pre-write pixels indefinitely."""
+    src = GatedSource(gate_t=1)
+    col = Collector()
+    loader = SliceLoader(src, col)
+    try:
+        loader.request(0, 0)
+        assert col.wait()
+        assert src.reading.wait(2.0)  # prefetch of (1, 0) is mid-read
+
+        src.data[1] = -1.0
+        loader.invalidate()
+        src.release.set()
+        time.sleep(0.1)
+
+        cached = loader.get_cached(1, 0)
+        assert cached is None or np.all(cached == -1.0)
+    finally:
+        loader.close()
+
+
+def test_invalidate_retries_in_flight_request():
+    """A *requested* frame interrupted by invalidate() is reloaded, so the
+    view still receives the post-write pixels."""
+    src = GatedSource(gate_t=2)
+    col = Collector()
+    loader = SliceLoader(src, col)
+    try:
+        loader.request(2, 0)
+        assert src.reading.wait(2.0)
+
+        src.data[2] = -1.0
+        loader.invalidate()
+        src.release.set()
+
+        assert col.wait()
+        key, plane = col.delivered[-1]
+        assert key == (2, 0)
+        assert np.all(plane == -1.0)
+    finally:
+        loader.close()
