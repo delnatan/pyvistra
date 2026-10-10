@@ -964,6 +964,34 @@ def _load_standard_image_format(filepath, use_memmap=True, dims=None):
     }
 
 
+# tifffile series axis letters that map onto pyvistra's TZCYX model. "S"
+# is RGB(A) samples, displayed as channels. Anything else (Q/I = unknown or
+# generic sequence, E, P, ...) is ambiguous, so it falls back to heuristics.
+_TIFF_AXIS_TO_DIM = {"T": "t", "Z": "z", "C": "c", "S": "c", "Y": "y", "X": "x"}
+
+
+def _tiff_series_dims(filepath, shape):
+    """Map the axes tifffile reports for series 0 onto TZCYX.
+
+    Returns ``(dims, is_rgb)`` -- a ``normalize_to_5d`` dims string and
+    whether the channel axis is RGB samples -- or ``None`` when the axes
+    don't map unambiguously (unknown letters, both C and S, or a shape
+    mismatch with the already-read array's ``shape``).
+    """
+    try:
+        with tifffile.TiffFile(filepath) as tif:
+            series = tif.series[0]
+            axes, series_shape = series.axes.upper(), tuple(series.shape)
+    except Exception:
+        return None
+    if series_shape != tuple(shape) or not set(axes) <= set(_TIFF_AXIS_TO_DIM):
+        return None
+    dims = "".join(_TIFF_AXIS_TO_DIM[a] for a in axes)
+    if len(set(dims)) != len(dims) or "y" not in dims or "x" not in dims:
+        return None
+    return dims, "S" in axes
+
+
 def _load_tiff_format(filepath, use_memmap=True, dims=None):
     scale = (1.0, 1.0, 1.0)
 
@@ -975,8 +1003,15 @@ def _load_tiff_format(filepath, use_memmap=True, dims=None):
     else:
         img = tifffile.imread(filepath)
 
-    # Detect RGB before any transformation
-    detected_rgb = is_rgb_image(img)
+    # Prefer the file's own axis labels (ImageJ hyperstacks, OME-TIFF):
+    # shape heuristics alone can't tell a timelapse or a channel stack from
+    # a Z-stack once singleton axes are squeezed out. An explicit `dims`
+    # from the caller still wins.
+    series_info = _tiff_series_dims(filepath, img.shape) if dims is None else None
+    if series_info is not None:
+        dims, detected_rgb = series_info
+    else:
+        detected_rgb = is_rgb_image(img)
 
     # Extract Metadata
     try:
