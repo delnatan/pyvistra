@@ -3566,8 +3566,10 @@ class ImageWindow(QMainWindow):
 
     def _key_touches_current_slice(self, key):
         """Conservative check: returns True if a buffer write at *key* could
-        affect the currently displayed (t, z) slice. Unknown keys are
-        treated as overlapping (better to over-refresh than miss updates).
+        affect what's displayed -- the current t, and the current z or, in
+        Z-projection mode, any z inside the projected range. Unknown keys
+        are treated as overlapping (better to over-refresh than miss
+        updates).
         """
         if not isinstance(key, tuple):
             key = (key,)
@@ -3576,20 +3578,26 @@ class ImageWindow(QMainWindow):
         if len(key) < 2:
             return True
 
-        def hits(axis_val, current, size):
+        def hits(axis_val, lo, hi, size):
+            """Whether the indices *axis_val* writes intersect [lo, hi]."""
             if isinstance(axis_val, slice):
-                start, stop, step = axis_val.indices(size)
-                return (
-                    start <= current < stop
-                    and (current - start) % step == 0
-                )
+                written = range(*axis_val.indices(size))
+                return any(lo <= i <= hi for i in written)
             try:
-                return int(axis_val) == current
+                i = int(axis_val)
             except (TypeError, ValueError):
                 return True
+            if i < 0:
+                i += size
+            return lo <= i <= hi
 
-        return hits(key[0], self.t_idx, self.T) and hits(
-            key[1], self.z_idx, self.Z
+        vs = self.view_state
+        if vs.z_projection:
+            z_lo, z_hi = vs.z_range if vs.z_range is not None else (0, self.Z - 1)
+        else:
+            z_lo = z_hi = self.z_idx
+        return hits(key[0], self.t_idx, self.t_idx, self.T) and hits(
+            key[1], z_lo, z_hi, self.Z
         )
 
     def update_view(self):
