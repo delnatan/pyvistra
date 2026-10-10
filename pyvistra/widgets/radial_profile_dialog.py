@@ -51,6 +51,8 @@ def radial_profile(image_2d, cx, cy, radius):
     Pure numpy: takes a 2D array and returns ``(radii, profile)``, both
     length ``floor(max(1, radius)) + 1``. Restricted to the bounding box
     around the circle for efficiency rather than scanning the whole image.
+    ``cx``/``cy`` are world pixel coordinates (pixel centers at ``i + 0.5``,
+    see ``calibration.PIXEL_CENTER_OFFSET``).
     """
     H, W = image_2d.shape
     max_r = max(1.0, float(radius))
@@ -64,7 +66,8 @@ def radial_profile(image_2d, cx, cy, radius):
     n_bins = int(np.floor(max_r)) + 1
     sub = np.asarray(image_2d[y0:y1, x0:x1], dtype=np.float64)
     yy, xx = np.mgrid[y0:y1, x0:x1]
-    r = np.hypot(xx - cx, yy - cy)
+    off = calibration.PIXEL_CENTER_OFFSET
+    r = np.hypot(xx + off - cx, yy + off - cy)
     r_bin = r.astype(np.int64)
     # The crop is a square bounding box, so its corners are up to
     # radius*sqrt(2) away -- outside the actual circle. Exclude them rather

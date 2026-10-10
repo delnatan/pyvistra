@@ -79,14 +79,16 @@ def test_radial_profile_aligns_windows_with_different_pixel_sizes():
     size_a = 200
     yy, xx = np.mgrid[0:size_a, 0:size_a]
     c_a = size_a // 2
-    r_a = np.hypot(xx - c_a, yy - c_a)
+    # Distances from each pixel's drawn center (world i + 0.5) to world
+    # c_a, which is also the physical center (10um) shared with B.
+    r_a = np.hypot(xx + 0.5 - c_a, yy + 0.5 - c_a)
     img_a = np.where(r_a <= 51, 100.0, 0.0).astype(np.float32)
     win_a = imshow(img_a[None, None, None, :, :], "A", scale=(1.0, 0.1, 0.1))
 
     size_b = 100
     yy, xx = np.mgrid[0:size_b, 0:size_b]
     c_b = size_b // 2
-    r_b = np.hypot(xx - c_b, yy - c_b)
+    r_b = np.hypot(xx + 0.5 - c_b, yy + 0.5 - c_b)
     img_b = np.where(r_b <= 26, 200.0, 0.0).astype(np.float32)
     win_b = imshow(img_b[None, None, None, :, :], "B", scale=(1.0, 0.2, 0.2))
 

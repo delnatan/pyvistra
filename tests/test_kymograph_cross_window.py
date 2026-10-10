@@ -154,8 +154,9 @@ def test_worker_samples_target_window_at_correct_physical_position():
     win_b = imshow(img_b, "B", scale=(1.0, 0.2, 0.2))
 
     layer = win_a.add_shape_layer("Shapes")
-    # Horizontal line at physical y=5um in A (pixel y=50), spanning x.
-    cmd = AddShape(LINE, [0, 50, 99, 50], t=0, z=0, label="line")
+    # Horizontal line at physical y=5.1um: the center of B's row 25, which
+    # spans [5.0, 5.2)um (world y=51 in A's 0.1um grid).
+    cmd = AddShape(LINE, [0, 51, 99, 51], t=0, z=0, label="line")
     layer.undo_stack.push(cmd, layer.data)
     sid = cmd.shape_id
 

@@ -17,6 +17,18 @@ def test_radial_profile_uniform_disk():
     np.testing.assert_allclose(profile, 3.0)
 
 
+def test_radial_profile_centered_on_drawn_pixel():
+    """Regression: a circle centered on the visual center of a lone bright
+    pixel (world ``i + 0.5``) must put that pixel at r=0 (used to read
+    0.25, smeared across a half-pixel-shifted grid)."""
+    img = np.zeros((21, 21), dtype=np.float32)
+    img[10, 10] = 1.0
+
+    radii, profile = radial_profile(img, 10.5, 10.5, 4.0)
+    assert profile[0] == 1.0
+    np.testing.assert_allclose(profile[1:], 0.0)
+
+
 def test_radial_profile_excludes_bounding_box_corners():
     """Regression test: the crop is a square bounding box, so its corners
     sit up to radius*sqrt(2) away from center -- outside the requested
@@ -25,7 +37,8 @@ def test_radial_profile_excludes_bounding_box_corners():
     size = 200
     yy, xx = np.mgrid[0:size, 0:size]
     cx, cy = size // 2, size // 2
-    r_true = np.hypot(xx - cx, yy - cy)
+    # Distance from each pixel's drawn center (world i + 0.5).
+    r_true = np.hypot(xx + 0.5 - cx, yy + 0.5 - cy)
 
     # Bright out to r=51 (comfortably covers the outermost bin's true
     # population, r in [50, 51)); dark only in the true bounding-box

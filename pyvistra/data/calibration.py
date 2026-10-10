@@ -19,6 +19,28 @@ from __future__ import annotations
 import numpy as np
 
 
+# vispy's Image visual draws pixel ``i`` over ``[i, i + 1)``, so in shape /
+# world pixel coordinates (what the mouse and every ShapeRecord use) pixel
+# centers sit at ``i + 0.5``. Array-index space (``map_coordinates``,
+# ``np.mgrid``) puts them at ``i``. Every sampler or rasterizer that takes
+# shape geometry must cross between the two through this offset, or results
+# shift by half a pixel relative to what is drawn on screen.
+PIXEL_CENTER_OFFSET = 0.5
+
+
+def world_to_index(points_xy: np.ndarray) -> np.ndarray:
+    """``(N, 2)`` world xy -> array-index xy (pixel centers at integers)."""
+    return np.asarray(points_xy, dtype=float) - PIXEL_CENTER_OFFSET
+
+
+def samples_for_length(length_px: float) -> int:
+    """Default sample count for a path ``length_px`` pixels long: one per
+    pixel step *including both endpoints* (``length + 1``), so a path drawn
+    through pixel centers samples exactly those centers instead of
+    stretching ``length`` samples across ``length`` pixels."""
+    return max(2, int(np.ceil(length_px)) + 1)
+
+
 def window_scale_yx(window) -> tuple[float, float] | None:
     """``(sy, sx)`` from ``window.meta["scale"]``, or ``None`` if the
     window (or the scale) isn't set — tolerates ``window=None`` so callers
@@ -79,12 +101,13 @@ def radius_phys_to_px(radius_phys: float, scale_yx: tuple[float, float]) -> floa
 def sample_along_path(
     image_2d: np.ndarray, path_xy: np.ndarray, *, order: int = 1, mode: str = "nearest"
 ) -> np.ndarray:
-    """Sample ``image_2d`` at ``(N, 2)`` xy pixel coordinates via
+    """Sample ``image_2d`` at ``(N, 2)`` world xy pixel coordinates (the
+    shape/mouse frame, see :data:`PIXEL_CENTER_OFFSET`) via
     ``scipy.ndimage.map_coordinates`` (which takes ``[rows, cols]`` =
     ``[y, x]`` — this is the one place that transpose happens)."""
     from scipy.ndimage import map_coordinates
 
-    path_xy = np.asarray(path_xy, dtype=float)
+    path_xy = world_to_index(path_xy)
     xs = path_xy[:, 0]
     ys = path_xy[:, 1]
     coords = np.array([ys, xs], dtype=float)

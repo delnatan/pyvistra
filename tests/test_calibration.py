@@ -66,14 +66,38 @@ def test_radius_px_to_phys_and_back_roundtrip():
 
 
 def test_sample_along_path_matches_direct_map_coordinates():
+    """World coords put pixel centers at ``i + 0.5``; map_coordinates puts
+    them at ``i`` -- sample_along_path must shift between the two."""
     from scipy.ndimage import map_coordinates
 
     image = np.arange(25, dtype=float).reshape(5, 5)
-    path_xy = np.array([[0.0, 0.0], [2.5, 1.5], [4.0, 4.0]])
+    path_xy = np.array([[0.5, 0.5], [2.5, 1.5], [4.5, 4.5]])
 
     got = sample_along_path(image, path_xy)
 
-    xs = path_xy[:, 0]
-    ys = path_xy[:, 1]
+    xs = path_xy[:, 0] - 0.5
+    ys = path_xy[:, 1] - 0.5
     expected = map_coordinates(image, np.array([ys, xs]), order=1, mode="nearest")
     assert np.allclose(got, expected)
+
+
+def test_sample_along_path_hits_drawn_pixel_center():
+    """Regression: vispy draws pixel i over [i, i+1), so a line drawn
+    through the visual center of a lone bright pixel must read its full
+    value, not a half-pixel-shifted bilinear blend (used to read 0.25)."""
+    image = np.zeros((21, 21))
+    image[10, 10] = 1.0
+    path_xy = np.array([[9.5, 10.5], [10.5, 10.5], [11.5, 10.5]])
+
+    assert np.allclose(sample_along_path(image, path_xy), [0.0, 1.0, 0.0])
+
+
+def test_samples_for_length_lands_one_sample_per_pixel():
+    """Regression: a 10px path used to get 10 samples (1.11px apart), so a
+    line drawn through pixel centers never sampled any of them."""
+    from pyvistra.data.calibration import samples_for_length
+
+    assert samples_for_length(10.0) == 11
+    assert np.allclose(np.diff(np.linspace(5.5, 15.5, samples_for_length(10.0))), 1.0)
+    assert samples_for_length(0.0) == 2
+    assert samples_for_length(2.3) == 4  # spacing <= 1px for fractional lengths

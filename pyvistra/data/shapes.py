@@ -16,6 +16,8 @@ from typing import Any, Callable
 
 import numpy as np
 
+from .calibration import PIXEL_CENTER_OFFSET
+
 # Shape type constants
 RECTANGLE = "rectangle"
 CIRCLE = "circle"
@@ -549,21 +551,23 @@ def rect_mask(rec: ShapeRecord, Y: int, X: int) -> np.ndarray | None:
 
 
 def circle_mask(rec: ShapeRecord, Y: int, X: int) -> np.ndarray | None:
-    """Boolean ``(Y, X)`` mask of a CIRCLE's interior, or ``None`` if its
-    radius is zero."""
+    """Boolean ``(Y, X)`` mask of pixels whose centers lie inside a CIRCLE,
+    or ``None`` if its radius is zero."""
     p = rec.params
     cx, cy = float(p[0]), float(p[1])
     radius = float(np.hypot(p[2] - cx, p[3] - cy))
     if radius <= 0:
         return None
     yy, xx = np.ogrid[:Y, :X]
+    xx = xx + PIXEL_CENTER_OFFSET
+    yy = yy + PIXEL_CENTER_OFFSET
     return (xx - cx) ** 2 + (yy - cy) ** 2 <= radius ** 2
 
 
 def polygon_mask(rec: ShapeRecord, Y: int, X: int) -> np.ndarray | None:
-    """Boolean ``(Y, X)`` mask of a closed POLYLINE's interior via its
-    outline (:func:`get_outline`), or ``None`` if it isn't closed or has
-    too few points to enclose an area."""
+    """Boolean ``(Y, X)`` mask of pixels whose centers lie inside a closed
+    POLYLINE's outline (:func:`get_outline`), or ``None`` if it isn't closed
+    or has too few points to enclose an area."""
     if not polyline_is_closed(rec):
         return None
     outline = get_outline(rec)
@@ -571,8 +575,8 @@ def polygon_mask(rec: ShapeRecord, Y: int, X: int) -> np.ndarray | None:
         return None
     poly = outline[:-1]  # drop closing duplicate
     yy, xx = np.mgrid[:Y, :X]
-    px = xx.ravel().astype(np.float32)
-    py = yy.ravel().astype(np.float32)
+    px = xx.ravel().astype(np.float32) + PIXEL_CENTER_OFFSET
+    py = yy.ravel().astype(np.float32) + PIXEL_CENTER_OFFSET
     n = len(poly)
     inside = np.zeros(px.shape, dtype=bool)
     j = n - 1

@@ -567,7 +567,7 @@ class LineProfileDialog(WindowSeriesMixin, QDialog):
             from .kymograph_dialog import _sample_coords, _raw_pixel_length
 
             length = max(2.0, _raw_pixel_length(rec))
-            path = _sample_coords(rec, max(2, int(np.ceil(length))))
+            path = _sample_coords(rec, calibration.samples_for_length(length))
             self.current_line_data = {
                 "p1": (float(path[0, 0]), float(path[0, 1])),
                 "p2": (float(path[-1, 0]), float(path[-1, 1])),
@@ -637,8 +637,8 @@ class LineProfileDialog(WindowSeriesMixin, QDialog):
         if path is not None and len(path) >= 2:
             path_px_source = np.asarray(path, dtype=float)
         else:
-            num_points = max(
-                2, int(np.ceil(np.hypot(p2[0] - p1[0], p2[1] - p1[1])))
+            num_points = calibration.samples_for_length(
+                np.hypot(p2[0] - p1[0], p2[1] - p1[1])
             )
             path_px_source = np.column_stack(
                 [

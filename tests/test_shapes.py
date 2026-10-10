@@ -577,11 +577,13 @@ def test_circle_mask_matches_radius():
     from pyvistra.data.shapes import circle_mask
 
     sd = ShapeData()
-    sid = sd.add(CIRCLE, [10, 10, 13, 10])  # center (10,10), radius 3
+    # Centered on pixel (10, 10)'s drawn center (world i + 0.5), radius 3.
+    sid = sd.add(CIRCLE, [10.5, 10.5, 13.5, 10.5])
     mask = circle_mask(sd.get(sid), Y=20, X=20)
     assert mask[10, 10]  # center inside
-    assert mask[10, 13]  # exactly on radius
+    assert mask[10, 13]  # pixel center exactly on radius
     assert not mask[10, 14]  # just outside
+    assert mask.sum() == mask[7:14, 7:14].sum()  # symmetric about pixel 10
 
 
 def test_circle_mask_none_for_zero_radius():

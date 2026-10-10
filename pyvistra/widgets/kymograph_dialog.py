@@ -73,7 +73,7 @@ def _sample_coords(rec, num_points: int) -> np.ndarray:
 
 
 def _path_length(rec) -> float:
-    coords = _sample_coords(rec, max(2, int(np.ceil(_raw_pixel_length(rec)))))
+    coords = _sample_coords(rec, calibration.samples_for_length(_raw_pixel_length(rec)))
     seg = np.diff(coords, axis=0)
     return float(np.hypot(seg[:, 0], seg[:, 1]).sum())
 
@@ -114,26 +114,17 @@ class KymographWorker(QObject):
 
     def run(self):
         try:
-            from scipy.ndimage import map_coordinates
-
             _T, _Z, C, _Y, _X = self._source.shape
             t_values = range(self._t_start, self._t_end + 1)
-            total = max(1, len(list(range(self._t_start, self._t_end + 1))) * C)
+            total = max(1, len(t_values) * C)
             done = 0
-            # map_coordinates takes [rows, cols] = [y, x].
-            ys = self._coords[:, 1]
-            xs = self._coords[:, 0]
             for row_idx, t in enumerate(t_values):
-                if self._cancel:
-                    self.cancelled.emit()
-                    return
                 for c in range(C):
                     if self._cancel:
                         self.cancelled.emit()
+                        return
                     frame = np.asarray(self._source[t, self._z, c, :, :])
-                    sampled = map_coordinates(
-                        frame, [ys, xs], order=1, mode="nearest"
-                    )
+                    sampled = calibration.sample_along_path(frame, self._coords)
                     self._buffer[0, 0, c, row_idx, :] = np.asarray(
                         sampled, dtype=self._buffer.dtype
                     )
@@ -161,7 +152,7 @@ class KymographDialog(QDialog):
 
         rec = layer.data.get(shape_id)
         path_len = _raw_pixel_length(rec)
-        default_npoints = max(2, int(np.ceil(path_len)))
+        default_npoints = calibration.samples_for_length(path_len)
         self._default_z_anchor = int(rec.z) if rec.z != ALL_FRAMES else int(viewer.z_idx)
 
         outer = QVBoxLayout(self)
