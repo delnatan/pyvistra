@@ -1,6 +1,7 @@
 """Zarr / OME-Zarr loading (io.load_zarr + data.proxies.Zarr5DProxy)."""
 
 import itertools
+import os
 
 import numpy as np
 import pytest
@@ -81,3 +82,41 @@ def test_plain_zarr_keeps_shape_heuristic(tmp_path):
 
     assert proxy.shape == (1, 3, 1, 4, 5)  # 3D -> Z-stack, as before
     assert meta["filename"] == "plain.zarr"
+
+
+def _make_zarr(path):
+    zarr.save_array(str(path), np.full((2, 4, 5), 7, np.uint8))
+
+
+def test_load_image_accepts_zarr_dir_without_trailing_slash(tmp_path):
+    """Regression: only "x.zarr/" was recognized; "x.zarr" (QFileDialog,
+    os.walk, scripts) fell through to the TIFF loader and failed."""
+    from pyvistra.io import estimate_load_bytes, load_image
+
+    path = tmp_path / "img.zarr"
+    _make_zarr(path)
+
+    for p in (str(path), str(path) + "/"):
+        img, meta = load_image(p)
+        assert img.shape == (1, 2, 1, 4, 5)
+        assert meta["filename"] == "img.zarr"
+        assert estimate_load_bytes(p) == 2 * 4 * 5
+
+
+def test_collect_image_files_finds_nested_zarr(tmp_path):
+    """Regression: os.walk directory names never end in "/", so zarr
+    images inside a dropped folder were walked into instead of opened."""
+    from pyvistra.data.labels import SparseLabels
+    from pyvistra.ui.toolbar import collect_image_files
+
+    folder = tmp_path / "exp"
+    (folder / "sub").mkdir(parents=True)
+    _make_zarr(folder / "a.zarr")
+    _make_zarr(folder / "sub" / "b.zarr")
+    SparseLabels((4, 5)).save(folder / "a.sparse.zarr")  # labels, not an image
+    (folder / "c.tif").write_bytes(b"")
+
+    found = collect_image_files([str(folder)])
+
+    rel = sorted(os.path.relpath(p, folder) for p in found)
+    assert rel == ["a.zarr", "c.tif", os.path.join("sub", "b.zarr")]

@@ -893,6 +893,18 @@ def load_image(filepath, use_memmap=True, dims=None, load_mode="mapped"):
     return data, meta
 
 
+def is_zarr_dir(path):
+    """Whether ``path`` is a zarr image directory, with or without a
+    trailing separator (Finder drops add one, os.walk/QFileDialog don't).
+    ``.sparse.zarr`` folders are label stores, not images."""
+    name = os.path.basename(str(path).rstrip("/\\")).lower()
+    return (
+        name.endswith(".zarr")
+        and not name.endswith(".sparse.zarr")
+        and os.path.isdir(path)
+    )
+
+
 def estimate_load_bytes(filepath):
     """Cheap, header-only estimate of a file's fully-loaded in-memory
     footprint, or ``None`` if the format has no lazy alternative to weigh
@@ -903,7 +915,7 @@ def estimate_load_bytes(filepath):
     for :func:`load_image`.
     """
     try:
-        if filepath.endswith(".zarr/") and os.path.isdir(filepath):
+        if is_zarr_dir(filepath):
             proxy, _ = load_zarr(filepath)
             try:
                 return int(np.prod(proxy.shape)) * proxy.dtype.itemsize
@@ -950,7 +962,7 @@ def _load_image_raw(filepath, use_memmap=True, dims=None):
 
     # General zarr directories aren't suffix-loadable files (need an isdir
     # check first), so they stay a pre-registry special case.
-    if filepath.endswith(".zarr/") and os.path.isdir(filepath):
+    if is_zarr_dir(filepath):
         return load_zarr(filepath)
 
     # Longest-suffix-match first, so a future plugin registering a

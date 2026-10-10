@@ -23,7 +23,7 @@ from vispy import app
 from .. import colors as tokens
 from .._version import get_version
 from ..apps.console import console_exists, get_console
-from ..io import estimate_load_bytes
+from ..io import estimate_load_bytes, is_zarr_dir
 from ..settings import get_in_memory_threshold_bytes
 from .manager import manager
 
@@ -53,6 +53,54 @@ class _ImageLoadWorker(QObject):
             self.error.emit(str(e), self.filepath, self)
             return
         self.finished.emit(data, meta, self.filepath, self)
+
+
+def collect_image_files(paths):
+    """Expand dropped/selected paths into a natsorted list of openable
+    images: supported files, zarr image directories, and both of those
+    found recursively inside plain folders (hidden entries skipped, zarr
+    directories not descended into).
+    """
+    # Collect supported image files, driven by the same input-format
+    # registry load_image() itself dispatches through (see io.py) --
+    # matched via suffix rather than splitext so a plugin-registered
+    # multi-dot extension (e.g. ".psf.h5") works without special-casing
+    # here.
+    from ..io import available_input_formats
+
+    supported_ext = tuple(available_input_formats())
+
+    def is_supported(name):
+        return name.lower().endswith(supported_ext)
+
+    image_files = []
+
+    for f in paths:
+        # Check for .zarr directories (general Zarr arrays / OME-Zarr).
+        if is_zarr_dir(f):
+            image_files.append(f)
+        elif os.path.isdir(f):
+            # Folder: collect all images recursively
+            for root, dirs, names in os.walk(f):
+                # Skip hidden directories (e.g. .Spotlight-V100, .fseventsd)
+                dirs[:] = [d for d in dirs if not d.startswith(".")]
+                # Check for .zarr directories (skip descending into them)
+                zarr_dirs = [
+                    d for d in dirs if is_zarr_dir(os.path.join(root, d))
+                ]
+                for d in zarr_dirs:
+                    image_files.append(os.path.join(root, d))
+                    dirs.remove(d)  # Don't descend into zarr directories
+                for name in names:
+                    if name.startswith("."):
+                        continue
+                    if is_supported(name):
+                        image_files.append(os.path.join(root, name))
+        elif not os.path.basename(f).startswith(".") and is_supported(f):
+            image_files.append(f)
+
+    image_files.sort(key=natsort_key)
+    return image_files
 
 
 class Toolbar(QMainWindow):
@@ -329,46 +377,9 @@ class Toolbar(QMainWindow):
             event.ignore()
 
     def dropEvent(self, event: QDropEvent):
-        files = [u.toLocalFile() for u in event.mimeData().urls()]
-
-        # Collect supported image files, driven by the same input-format
-        # registry load_image() itself dispatches through (see io.py) --
-        # matched via suffix rather than splitext so a plugin-registered
-        # multi-dot extension (e.g. ".psf.h5") works without special-casing
-        # here.
-        from ..io import available_input_formats
-
-        supported_ext = tuple(available_input_formats())
-
-        def is_supported(name):
-            return name.lower().endswith(supported_ext)
-
-        image_files = []
-
-        for f in files:
-            # Check for .zarr directories (general Zarr arrays / OME-Zarr).
-            if f.endswith(".zarr/") and os.path.isdir(f):
-                image_files.append(f)
-            elif os.path.isdir(f):
-                # Folder: collect all images recursively
-                for root, dirs, names in os.walk(f):
-                    # Skip hidden directories (e.g. .Spotlight-V100, .fseventsd)
-                    dirs[:] = [d for d in dirs if not d.startswith(".")]
-                    # Check for .zarr directories (skip descending into them)
-                    zarr_dirs = [d for d in dirs if d.endswith(".zarr/")]
-                    for d in zarr_dirs:
-                        image_files.append(os.path.join(root, d))
-                        dirs.remove(d)  # Don't descend into zarr directories
-                    for name in names:
-                        if name.startswith("."):
-                            continue
-                        if is_supported(name):
-                            image_files.append(os.path.join(root, name))
-            elif not os.path.basename(f).startswith(".") and is_supported(f):
-                image_files.append(f)
-
-        # Sort by filename
-        image_files.sort(key=natsort_key)
+        image_files = collect_image_files(
+            u.toLocalFile() for u in event.mimeData().urls()
+        )
 
         if len(image_files) > 1:
             # Multiple files -> TiledViewer
