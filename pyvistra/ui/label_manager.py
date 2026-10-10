@@ -87,6 +87,9 @@ class LabelManager(QWidget):
         # Labels List
         self.layout.addWidget(QLabel("Labels:"))
         self.label_list = QListWidget()
+        # Ctrl/Shift multi-select: "Merge" needs at least two selected
+        # labels (delete/rename still act on the current item).
+        self.label_list.setSelectionMode(QListWidget.ExtendedSelection)
         self.label_list.itemClicked.connect(self.on_item_clicked)
         self.label_list.itemDoubleClicked.connect(self.on_item_double_clicked)
         self.layout.addWidget(self.label_list)
