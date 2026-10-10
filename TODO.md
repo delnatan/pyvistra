@@ -5,6 +5,49 @@ codebase shippable.
 
 ---
 
+## Audit follow-ups (2026-10-10)
+
+From the 2026-10-10 codebase audit. All reported *bugs* are fixed (21
+commits, `62ba95e`..`f71e12f`); these are the feature and design items it
+also turned up. Unordered; none is blocking.
+
+- [ ] **Undo for label painting.** Brush/eraser strokes and contour fills
+      mutate `SparseLabels` directly (`ImageWindow._paint_stroke`,
+      `_fill_closed_contour`) instead of going through a `Command` on an
+      `UndoStack`, so an accidental erase is permanent -- even though
+      DESIGN.md lists label painting under the Command pattern. Needs a
+      stroke-granularity command (snapshot touched pixels per label on
+      press, commit on release). Touches the mouse dispatcher DESIGN.md
+      flags as accepted risk: confirm scope before starting.
+- [ ] **Uniform data-ownership rule.** `ImageWindow` takes over one
+      reference to a proxy it's given without acquiring; internal handoffs
+      (toolbar loads, `BufferProcessingRunner`) and plugins (resolvde
+      `decon_dialog`, jssl_denoise, psfkit) pre-acquire on its behalf, and
+      `imshow` acquires for callers. Cleaner: every holder acquires what it
+      keeps and releases what it acquired. Requires coordinated changes in
+      those plugin repos, or they'll leak buffers.
+- [ ] **Shared `Observable` base.** subscribe/notify is copy-pasted across
+      `ChannelDisplayList`, `ViewState`, `OverlayState`, `ShapeData`,
+      `ImageBuffer` (and more), each swallowing listener exceptions with
+      `except Exception: pass` -- ~50 such blocks codebase-wide and no
+      `logging` use at all. One base class that logs via
+      `logging.exception` would remove the duplication and stop hiding
+      bugs.
+- [ ] **Faster label erase.** `SparseLabels.remove_pixels` builds a Python
+      set of coordinate tuples and loops per pixel; slow for large objects.
+      Vectorize (`np.ravel_multi_index` + `np.isin`).
+- [ ] **Faster polygon masks.** `shapes.polygon_mask` allocates a
+      full-image grid and makes one pass over it per outline vertex (~200
+      for smoothed polylines). Rasterize within the shape's bounding box
+      (e.g. `skimage.draw.polygon`, already a dependency), keeping the
+      pixel-center convention (`calibration.PIXEL_CENTER_OFFSET`).
+- [ ] **Sweep stale `~/.pyvistra/buffers`.** `ImageBuffer` stores are
+      deleted on release, but a crash leaves them on disk forever. Remove
+      orphaned `*.zarr` dirs at startup (skip any still in use by another
+      running instance).
+
+---
+
 ## Completed (historical, condensed)
 
 Full rationale for these lives in git history / commit messages; this is
