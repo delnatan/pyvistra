@@ -148,9 +148,23 @@ class CZIReader:
         self.channels_info = []
 
         try:
-            channels = meta.findall(".//Channel")
+            # `.//Channel` alone also matches the acquisition setup's
+            # tracks/detectors (Experiment/.../Track/Channels), which come
+            # first in the document and include inactive detectors -- an
+            # LSM980 single-channel DAPI file reported "Ch1" with no
+            # wavelengths. The image's own channel list lives under
+            # Information/Image/Dimensions; DisplaySetting mirrors it.
+            channels = []
+            for xpath in (
+                ".//Information/Image/Dimensions/Channels/Channel",
+                ".//DisplaySetting/Channels/Channel",
+                ".//Channel",
+            ):
+                channels = meta.findall(xpath)
+                if channels:
+                    break
 
-            for i, channel in enumerate(channels):
+            for i, channel in enumerate(channels[: self.n_channels]):
                 info = {
                     "id": i,
                     "name": f"Channel {i}",
