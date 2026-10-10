@@ -47,3 +47,17 @@ def test_to_dense_does_not_wrap_large_label_ids():
     assert _labels_with((7, ([0], [0]))).to_dense().dtype == np.uint16  # unchanged default
     with pytest.raises(ValueError, match="does not fit"):
         labels.to_dense(np.uint16)
+
+
+@pytest.mark.parametrize("ys, xs", [([-1], [3]), ([3], [10])])
+def test_add_pixels_rejects_out_of_bounds(ys, xs):
+    """Regression: add()/update() validated bounds but add_pixels() didn't;
+    a -1 then wrapped onto the opposite edge in to_dense()."""
+    labels = _labels_with((1, ([0], [0])))
+
+    with pytest.raises(ValueError, match="out of bounds"):
+        labels.add_pixels(1, (np.array(ys), np.array(xs)))
+    with pytest.raises(ValueError, match="out of bounds"):
+        labels.add_pixels(2, (np.array(ys), np.array(xs)))  # new label too
+
+    assert labels.labels == [1] and labels.area(1) == 1

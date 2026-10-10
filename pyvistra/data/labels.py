@@ -209,7 +209,7 @@ class SparseLabels:
         if label <= 0:
             raise ValueError(f"Label must be positive, got {label}")
 
-        coords = self._validate_coords(coords)
+        coords = self._check_bounds(self._validate_coords(coords))
 
         if label not in self._objects:
             self._objects[label] = coords
@@ -628,17 +628,19 @@ class SparseLabels:
 
     def _set_coords(self, label: int, coords: tuple[np.ndarray, ...]) -> None:
         """Set coordinates for a label with validation."""
-        arr = self._validate_coords(coords)
+        self._objects[label] = self._check_bounds(self._validate_coords(coords))
 
-        # Bounds checking
-        for i in range(arr.shape[0]):
-            if arr.shape[1] > 0:
+    def _check_bounds(self, arr: np.ndarray) -> np.ndarray:
+        """Raise if any coordinate falls outside ``self.shape``. Negative
+        indices must not slip through: numpy would silently wrap them onto
+        the opposite edge when rasterizing."""
+        if arr.shape[1] > 0:
+            for i in range(arr.shape[0]):
                 if arr[i].min() < 0 or arr[i].max() >= self._shape[i]:
                     raise ValueError(
                         f"Coordinates out of bounds for dimension {i}"
                     )
-
-        self._objects[label] = arr
+        return arr
 
     def __repr__(self) -> str:
         return (
