@@ -300,6 +300,9 @@ class SparseLabels:
 
         Raises:
             KeyError: If any label not found
+            ValueError: If ``new_label`` is <= 0, or names an existing object
+                that isn't one of ``labels`` (merging into it would silently
+                discard that object's pixels)
         """
         if not labels:
             raise ValueError("Must provide at least one label to merge")
@@ -312,6 +315,10 @@ class SparseLabels:
             new_label = min(labels)
         elif new_label <= 0:
             raise ValueError(f"New label must be positive, got {new_label}")
+        elif new_label in self._objects and new_label not in labels:
+            raise ValueError(
+                f"Label {new_label} already exists and is not being merged"
+            )
 
         # Collect all coordinates
         all_coords = [self._objects[label] for label in labels]
