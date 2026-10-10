@@ -1081,8 +1081,12 @@ def _load_tiff_format(filepath, use_memmap=True, dims=None):
             ij_meta = tif.imagej_metadata
             sz = 1.0
             frame_interval_s = None
+            # ImageJ stores the calibration unit separately ("unit=nm");
+            # both its Z spacing and (with ResolutionUnit NONE) the XY
+            # resolution are in that unit, not necessarily microns.
+            ij_um = _imagej_unit_to_um(ij_meta.get("unit")) if ij_meta else 1.0
             if ij_meta and "spacing" in ij_meta:
-                sz = ij_meta["spacing"]
+                sz = float(ij_meta["spacing"]) * ij_um
             if ij_meta:
                 frame_interval_s = _parse_imagej_frame_interval_seconds(ij_meta)
 
@@ -1123,6 +1127,9 @@ def _load_tiff_format(filepath, use_memmap=True, dims=None):
                 elif unit_val == 3:  # cm
                     sx *= 10000.0
                     sy *= 10000.0
+                else:  # NONE: unit comes from ImageJ metadata, if any
+                    sx *= ij_um
+                    sy *= ij_um
 
             scale = (sz, sy, sx)
 
@@ -1144,6 +1151,29 @@ def _load_tiff_format(filepath, use_memmap=True, dims=None):
         "is_rgb": detected_rgb,
         "frame_interval_s": frame_interval_s,
     }
+
+
+# ImageJ calibration unit strings -> microns. Inverse units (written for
+# FFT output, see save_tiff) scale the other way. Unknown/uncalibrated
+# ("pixel", "") stay 1.0 -- the historical assumption of microns.
+_IMAGEJ_UNIT_TO_UM = {
+    "nm": 1e-3, "nanometer": 1e-3, "nanometers": 1e-3,
+    "um": 1.0, "µm": 1.0, "μm": 1.0, "micron": 1.0, "microns": 1.0,
+    "micrometer": 1.0, "micrometers": 1.0,
+    "mm": 1e3, "millimeter": 1e3, "millimeters": 1e3,
+    "cm": 1e4, "m": 1e6, "meter": 1e6, "meters": 1e6,
+}
+
+
+def _imagej_unit_to_um(unit):
+    """Factor converting a length in ImageJ ``unit`` to microns."""
+    if not isinstance(unit, str):
+        return 1.0
+    u = unit.strip().lower().replace("\\u00b5", "µ")
+    if u.startswith("1/"):
+        factor = _IMAGEJ_UNIT_TO_UM.get(u[2:])
+        return 1.0 / factor if factor else 1.0
+    return _IMAGEJ_UNIT_TO_UM.get(u, 1.0)
 
 
 def _coerce_float_or_none(value):

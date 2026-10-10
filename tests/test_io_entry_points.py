@@ -70,3 +70,33 @@ def test_tiff_explicit_dims_override_file_axes(tmp_path):
     img, _meta = load_image(str(path), dims="zyx")
 
     assert img.shape == (1, 3, 1, 8, 8)
+
+
+@pytest.mark.parametrize(
+    "unit, factor",
+    [("nm", 1e-3), ("micron", 1.0), ("\\u00B5m", 1.0), ("mm", 1e3), ("pixel", 1.0)],
+)
+def test_tiff_imagej_unit_converted_to_microns(tmp_path, unit, factor):
+    """Regression: the ImageJ calibration unit was ignored, so a Fiji file
+    calibrated in nm loaded with a pixel size 1000x too large."""
+    path = tmp_path / "cal.tif"
+    tifffile.imwrite(
+        path,
+        np.zeros((2, 8, 8), np.uint16),
+        imagej=True,
+        resolution=(1 / 65.0, 1 / 65.0),  # 65 <unit>/px
+        metadata={"axes": "ZYX", "spacing": 200.0, "unit": unit},
+    )
+
+    _img, meta = load_image(str(path))
+
+    assert meta["scale"] == pytest.approx((200.0 * factor, 65.0 * factor, 65.0 * factor))
+
+
+def test_save_tiff_scale_roundtrips(tmp_path):
+    path = tmp_path / "own.tif"
+    save_tiff(str(path), np.zeros((1, 2, 1, 8, 8), np.uint16), scale=(0.3, 0.065, 0.065))
+
+    _img, meta = load_image(str(path))
+
+    assert meta["scale"] == pytest.approx((0.3, 0.065, 0.065))
