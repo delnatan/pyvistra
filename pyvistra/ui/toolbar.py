@@ -61,6 +61,10 @@ class Toolbar(QMainWindow):
         self.setWindowTitle(f"pyvistra v{get_version()}")
         self.setGeometry(100, 100, 600, 100)  # Wider
         self.setAcceptDrops(True)
+        # Keeps Python wrappers alive for windows this toolbar opened --
+        # a floated TiledViewer (setParent(None)) isn't held by anything
+        # else. Entries drop out on destruction (see _track_window), or
+        # every closed window's image data would stay pinned here.
         self.open_windows = []
         self._pending_loads = {}  # worker -> thread, keeps them alive
 
@@ -310,6 +314,14 @@ class Toolbar(QMainWindow):
         console.show()
         console.raise_()
 
+    def _track_window(self, window):
+        self.open_windows.append(window)
+        window.destroyed.connect(
+            lambda _obj=None, w=window: self.open_windows.remove(w)
+            if w in self.open_windows
+            else None
+        )
+
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
             event.accept()
@@ -366,7 +378,7 @@ class Toolbar(QMainWindow):
             from .workspace import present_window
 
             present_window(viewer)
-            self.open_windows.append(viewer)
+            self._track_window(viewer)
         elif len(image_files) == 1:
             # Single file -> regular ImageWindow
             self.spawn_viewer(image_files[0])
@@ -488,7 +500,7 @@ class Toolbar(QMainWindow):
         try:
             viewer = ImageWindow(data, meta=meta, filepath=filepath)
             present_window(viewer)
-            self.open_windows.append(viewer)
+            self._track_window(viewer)
         except Exception as e:
             print(f"Error opening {filepath}: {e}")
 
