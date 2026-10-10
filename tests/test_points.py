@@ -107,6 +107,7 @@ def test_point_table_update_point_coordinates_and_property():
 
 
 def test_point_table_dataframe_roundtrip_with_properties():
+    pytest.importorskip("pandas")  # optional dependency
     points = PointTable.from_arrays(
         point_id=[11, 12],
         t=[1, 1],
