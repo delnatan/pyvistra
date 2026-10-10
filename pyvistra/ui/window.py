@@ -2717,40 +2717,41 @@ class ImageWindow(QMainWindow):
         if self.labels is None or self.labels.n_objects == 0:
             return coords
 
-        # Build occupancy mask for current slice
-        occupied = np.zeros((self.Y, self.X), dtype=bool)
+        if len(coords) == 2:
+            zs = None
+            ys, xs = coords
+            planes = np.zeros(1, dtype=np.int64)
+        else:
+            zs, ys, xs = coords
+            # Only the slices this fill touches -- a Z-propagated fill
+            # spans every slice, and each must be checked against its own
+            # occupancy, not the currently displayed one.
+            planes = np.unique(zs)
+        occupied = np.zeros((len(planes), self.Y, self.X), dtype=bool)
 
         for label in self.labels:
             label_coords = self.labels.coords(label)
             if self.labels.ndim == 3:
-                # Filter to current Z slice
-                z_coords, y_coords, x_coords = label_coords
-                z_mask = z_coords == self.z_idx
-                y_slice = y_coords[z_mask]
-                x_slice = x_coords[z_mask]
+                lz, ly, lx = label_coords
+                if zs is None:
+                    keep = lz == self.z_idx  # 2D stroke on a 3D mask
+                    plane_idx = np.zeros(int(keep.sum()), dtype=np.int64)
+                else:
+                    keep = np.isin(lz, planes)
+                    plane_idx = np.searchsorted(planes, lz[keep])
+                ly, lx = ly[keep], lx[keep]
             else:
-                y_slice, x_slice = label_coords
+                ly, lx = label_coords
+                plane_idx = np.zeros(len(ly), dtype=np.int64)
 
-            # Bounds check before setting
-            valid = (
-                (y_slice >= 0)
-                & (y_slice < self.Y)
-                & (x_slice >= 0)
-                & (x_slice < self.X)
-            )
-            occupied[y_slice[valid], x_slice[valid]] = True
+            valid = (ly >= 0) & (ly < self.Y) & (lx >= 0) & (lx < self.X)
+            occupied[plane_idx[valid], ly[valid], lx[valid]] = True
 
-        # Filter out occupied pixels
-        if len(coords) == 3:
-            # 3D coords
-            zs, ys, xs = coords
-            free = ~occupied[ys, xs]
-            return (zs[free], ys[free], xs[free])
-        else:
-            # 2D coords
-            ys, xs = coords
-            free = ~occupied[ys, xs]
+        if zs is None:
+            free = ~occupied[0, ys, xs]
             return (ys[free], xs[free])
+        free = ~occupied[np.searchsorted(planes, zs), ys, xs]
+        return (zs[free], ys[free], xs[free])
 
     def _paint_stroke(self, x, y, erase=False):
         """
