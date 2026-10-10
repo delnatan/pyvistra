@@ -4,7 +4,7 @@ Writes 5D image data in the Imaris HDF5 format (version 5.5.0),
 compatible with the Bitplane Imaris viewer.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import h5py
 import numpy as np
@@ -107,10 +107,14 @@ class ImarisWriter:
             _set_attr(grp["Data"], "HistogramMax", f"{vmax:.6f}")
             grp["Histogram"][:] = hist.astype(np.uint64)
 
-        # Grab a thumbnail slice from the first timepoint
-        if self._thumb_slice is None and t == 0:
-            mid_z = volume.shape[0] // 2
-            self._thumb_slice = volume[mid_z].copy()
+        # Thumbnail: mid-Z of the first timepoint, max-projected across
+        # channels (fmax so a NaN in one channel doesn't blank the pixel).
+        if t == 0:
+            mid = volume[volume.shape[0] // 2]
+            if self._thumb_slice is None:
+                self._thumb_slice = mid.copy()
+            else:
+                self._thumb_slice = np.fmax(self._thumb_slice, mid)
 
     def close(self):
         """Write DataSetInfo metadata, thumbnail, and close the file."""
@@ -120,13 +124,12 @@ class ImarisWriter:
         f = self._file
         T, Z, C, Y, X = self._T, self._Z, self._C, self._Y, self._X
         meta = self._metadata
-        scale = meta.get("scale", (1.0, 1.0, 1.0))
-        vz, vy, vx = scale
-        channels = meta.get("channels", [])
-        if not channels:
-            channels = [{"name": f"Channel {i}"} for i in range(C)]
+        vz, vy, vx = _coerce_scale(meta.get("scale"))
+        channels = meta.get("channels") or [
+            {"name": f"Channel {i}"} for i in range(C)
+        ]
         dataset_name = meta.get("name", meta.get("filename", "Image"))
-        timestamps = meta.get("timestamps", [])
+        timestamps = _resolve_timestamps(meta, T)
 
         # --- DataSetInfo ---
         info = f.create_group("DataSetInfo")
@@ -204,12 +207,10 @@ class ImarisWriter:
         ti_grp = info.create_group("TimeInfo")
         _set_attr(ti_grp, "DataSetTimePoints", str(T))
         _set_attr(ti_grp, "FileTimePoints", str(T))
-        for t in range(T):
-            if t < len(timestamps) and timestamps[t] is not None:
-                ts_str = timestamps[t].strftime("%Y-%m-%d %H:%M:%S.%f")
-            else:
-                ts_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
-            _set_attr(ti_grp, f"TimePoint{t + 1}", ts_str)
+        for t, ts in enumerate(timestamps):
+            _set_attr(
+                ti_grp, f"TimePoint{t + 1}", ts.strftime("%Y-%m-%d %H:%M:%S.%f")
+            )
 
         log_grp = info.create_group("Log")
         _set_attr(log_grp, "Entries", "0")
@@ -275,9 +276,11 @@ class ImarisWriter:
             return np.zeros((size, size, 4), dtype=np.uint8)
 
         img = self._thumb_slice.astype(np.float32)
-        vmin, vmax = img.min(), img.max()
+        finite = img[np.isfinite(img)]
+        vmin, vmax = (finite.min(), finite.max()) if finite.size else (0.0, 0.0)
         if vmax > vmin:
             img = (img - vmin) / (vmax - vmin) * 255.0
+        img = np.nan_to_num(img, nan=0.0, posinf=255.0, neginf=0.0)
         img = np.clip(img, 0, 255).astype(np.uint8)
 
         from scipy.ndimage import zoom
@@ -311,6 +314,9 @@ def save_imaris(
     """
     Save 5D data (T, Z, C, Y, X) to Imaris .ims HDF5 format.
 
+    Thin loop over :class:`ImarisWriter`: each (t, c) volume is read from
+    ``data`` exactly once and the pyramid levels are derived from it.
+
     Args:
         filepath: Output path (.ims)
         data: 5D array-like in pyvistra (T, Z, C, Y, X) format
@@ -318,214 +324,30 @@ def save_imaris(
             - 'scale': (vz, vy, vx) voxel sizes in microns
             - 'channels': list of dicts with 'name', optional wavelength info
             - 'filename' or 'name': dataset name
-            - 'timestamps': optional list of datetime objects
+            - 'timestamps' / 'timestamp_seconds' / 'frame_interval_s':
+              optional time information (see ``_resolve_timestamps``)
         resolution_levels: If True, generate downsampled pyramid levels.
             If False, only write full resolution.
         compression_level: gzip compression level 0-9 (default 2)
         progress_cb: Optional callback(fraction) for progress reporting
     """
-    # Normalize data to numpy
-    if hasattr(data, "shape") and hasattr(data, "__getitem__"):
-        T, Z, C, Y, X = data.shape
-    else:
+    if not (hasattr(data, "shape") and hasattr(data, "__getitem__")):
         data = np.asarray(data)
-        T, Z, C, Y, X = data.shape
+    T, Z, C, Y, X = data.shape
 
-    scale = metadata.get("scale", (1.0, 1.0, 1.0))
-    vz, vy, vx = scale
-
-    # Compute extents (Imaris convention: 0=X, 1=Y, 2=Z)
-    ext_max_x = X * vx
-    ext_max_y = Y * vy
-    ext_max_z = Z * vz
-
-    # Compute resolution pyramid shapes
-    level_shapes = [(Z, Y, X)]
-    if resolution_levels:
-        level_shapes = _compute_resolution_levels(Z, Y, X)
-
-    # Channel metadata
-    channels = metadata.get("channels", [])
-    if not channels:
-        channels = [{"name": f"Channel {i}"} for i in range(C)]
-
-    dataset_name = metadata.get("name", metadata.get("filename", "Image"))
-    timestamps = metadata.get("timestamps", [])
-
-    # Track total work units for progress
-    total_units = T * C * len(level_shapes)
-    done_units = 0
-
-    # Track per-channel global min/max across all timepoints
-    channel_mins = [np.inf] * C
-    channel_maxs = [-np.inf] * C
-
-    with h5py.File(filepath, "w") as f:
-        # Root attributes
-        _set_attr(f, "DataSetDirectoryName", "DataSet")
-        _set_attr(f, "DataSetInfoDirectoryName", "DataSetInfo")
-        _set_attr(f, "ImarisDataSet", "ImarisDataSet")
-        _set_attr(f, "ImarisVersion", "5.5.0")
-        _set_attr(f, "NumberOfDataSets", "1")
-        _set_attr(f, "ThumbnailDirectoryName", "Thumbnail")
-
-        ds = f.create_group("DataSet")
-
-        # Write each resolution level
-        for level_idx, (lz, ly, lx) in enumerate(level_shapes):
-            res_grp = ds.create_group(f"ResolutionLevel {level_idx}")
-            chunks = _compute_chunk_size(lz, ly, lx, data.dtype)
-
-            for t in range(T):
-                tp_grp = res_grp.create_group(f"TimePoint {t}")
-
-                for c in range(C):
-                    ch_grp = tp_grp.create_group(f"Channel {c}")
-
-                    # Get volume: (Z, Y, X)
-                    volume = np.asarray(data[t, :, c, :, :])
-
-                    # Downsample if needed
-                    if level_idx > 0:
-                        volume = _downsample_3d(volume, (lz, ly, lx))
-
-                    # Compute histogram and stats
-                    hist, vmin, vmax = _compute_histogram(volume)
-
-                    # Track channel global min/max (level 0 only)
-                    if level_idx == 0:
-                        channel_mins[c] = min(channel_mins[c], vmin)
-                        channel_maxs[c] = max(channel_maxs[c], vmax)
-
-                    # Write data
-                    dset = ch_grp.create_dataset(
-                        "Data",
-                        data=volume,
-                        chunks=chunks
-                        if all(
-                            cs <= ds
-                            for cs, ds in zip(chunks, volume.shape)
-                        )
-                        else None,
-                        compression="gzip",
-                        compression_opts=compression_level,
-                    )
-                    _set_attr(dset, "ImageSizeX", str(lx))
-                    _set_attr(dset, "ImageSizeY", str(ly))
-                    _set_attr(dset, "ImageSizeZ", str(lz))
-                    _set_attr(ch_grp, "ImageSizeX", str(lx))
-                    _set_attr(ch_grp, "ImageSizeY", str(ly))
-                    _set_attr(ch_grp, "ImageSizeZ", str(lz))
-                    _set_attr(ch_grp, "HistogramMin", f"{vmin:.6f}")
-                    _set_attr(ch_grp, "HistogramMax", f"{vmax:.6f}")
-                    _set_attr(dset, "HistogramMin", f"{vmin:.6f}")
-                    _set_attr(dset, "HistogramMax", f"{vmax:.6f}")
-
-                    # Write histogram
-                    ch_grp.create_dataset(
-                        "Histogram", data=hist.astype(np.uint64)
-                    )
-
-                    done_units += 1
-                    if progress_cb:
-                        progress_cb(done_units / total_units)
-
-        # --- DataSetInfo ---
-        info = f.create_group("DataSetInfo")
-
-        # Image group
-        img_grp = info.create_group("Image")
-        _set_attr(img_grp, "X", str(X))
-        _set_attr(img_grp, "Y", str(Y))
-        _set_attr(img_grp, "Z", str(Z))
-        _set_attr(img_grp, "Noc", str(C))
-        _set_attr(img_grp, "ExtMin0", "0")
-        _set_attr(img_grp, "ExtMin1", "0")
-        _set_attr(img_grp, "ExtMin2", "0")
-        _set_attr(img_grp, "ExtMax0", f"{ext_max_x:.6f}")
-        _set_attr(img_grp, "ExtMax1", f"{ext_max_y:.6f}")
-        _set_attr(img_grp, "ExtMax2", f"{ext_max_z:.6f}")
-        _set_attr(img_grp, "Unit", "1/um" if metadata.get("space") == "frequency" else "um")
-        _set_attr(img_grp, "Name", str(dataset_name))
-        _set_attr(
-            img_grp,
-            "RecordingDate",
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f"),
-        )
-        _set_attr(
-            img_grp,
-            "ResampleDimensionX",
-            str(level_shapes[-1][2]) if len(level_shapes) > 1 else str(X),
-        )
-        _set_attr(
-            img_grp,
-            "ResampleDimensionY",
-            str(level_shapes[-1][1]) if len(level_shapes) > 1 else str(Y),
-        )
-        _set_attr(
-            img_grp,
-            "ResampleDimensionZ",
-            str(level_shapes[-1][0]) if len(level_shapes) > 1 else str(Z),
-        )
-
-        # Channel groups
-        for c in range(C):
-            ch_info = channels[c] if c < len(channels) else {}
-            ch_grp = info.create_group(f"Channel {c}")
-
-            ch_name = ch_info.get("name", f"Channel {c}")
-            _set_attr(ch_grp, "Name", ch_name)
-            _set_attr(ch_grp, "ColorMode", "BaseColor")
-            _set_attr(ch_grp, "ColorOpacity", "1")
-
-            # Color: default to white for single channel, otherwise cycle
-            color = _default_channel_color(c, C)
-            _set_attr(ch_grp, "Color", color)
-
-            # Data range
-            cmin = channel_mins[c] if np.isfinite(channel_mins[c]) else 0
-            cmax = channel_maxs[c] if np.isfinite(channel_maxs[c]) else 1
-            _set_attr(ch_grp, "ColorRange", f"{cmin:.6f} {cmax:.6f}")
-            _set_attr(ch_grp, "Min", f"{cmin:.6f}")
-            _set_attr(ch_grp, "Max", f"{cmax:.6f}")
-
-            # Wavelength info if available
-            em = ch_info.get("emission_wavelength")
-            if em is not None:
-                _set_attr(ch_grp, "LSMEmissionWavelength", str(em))
-            ex = ch_info.get("excitation_wavelength")
-            if ex is not None:
-                _set_attr(ch_grp, "LSMExcitationWavelength", str(ex))
-
-        # Imaris group
-        imaris_grp = info.create_group("Imaris")
-        _set_attr(imaris_grp, "Version", "5.5")
-        _set_attr(imaris_grp, "ThumbnailMode", "thumbnailMIP")
-
-        # ImarisDataSet group
-        ids_grp = info.create_group("ImarisDataSet")
-        _set_attr(ids_grp, "Creator", "pyvistra")
-        _set_attr(ids_grp, "Version", "5.5.0")
-
-        # TimeInfo group
-        ti_grp = info.create_group("TimeInfo")
-        _set_attr(ti_grp, "DataSetTimePoints", str(T))
-        _set_attr(ti_grp, "FileTimePoints", str(T))
+    with ImarisWriter(
+        filepath,
+        data.shape,
+        data.dtype,
+        metadata,
+        resolution_levels=resolution_levels,
+        compression_level=compression_level,
+    ) as writer:
         for t in range(T):
-            if t < len(timestamps) and timestamps[t] is not None:
-                ts_str = timestamps[t].strftime("%Y-%m-%d %H:%M:%S.%f")
-            else:
-                ts_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
-            _set_attr(ti_grp, f"TimePoint{t + 1}", ts_str)
-
-        # Log group
-        log_grp = info.create_group("Log")
-        _set_attr(log_grp, "Entries", "0")
-
-        # --- Thumbnail ---
-        thumb = _generate_thumbnail(data)
-        thumb_grp = f.create_group("Thumbnail")
-        thumb_grp.create_dataset("Data", data=thumb)
+            for c in range(C):
+                writer.write_channel(t, c, np.asarray(data[t, :, c, :, :]))
+                if progress_cb:
+                    progress_cb((t * C + c + 1) / (T * C))
 
 
 # --- Internal helpers ---
@@ -543,24 +365,6 @@ def _encode_imaris_attribute(value):
 def _set_attr(obj, key, value):
     """Set an HDF5 attribute in Imaris character-array format."""
     obj.attrs[key] = _encode_imaris_attribute(value)
-
-
-def _compute_extents(shape_zyx, voxel_size_zyx):
-    """Compute Imaris extent values.
-
-    Returns:
-        dict with ExtMin0..2 and ExtMax0..2
-    """
-    z, y, x = shape_zyx
-    vz, vy, vx = voxel_size_zyx
-    return {
-        "ExtMin0": 0.0,
-        "ExtMin1": 0.0,
-        "ExtMin2": 0.0,
-        "ExtMax0": x * vx,
-        "ExtMax1": y * vy,
-        "ExtMax2": z * vz,
-    }
 
 
 def _compute_chunk_size(z, y, x, dtype):
@@ -585,35 +389,85 @@ def _compute_chunk_size(z, y, x, dtype):
 
 
 def _compute_histogram(volume):
-    """Compute 256-bin histogram of a 3D volume.
+    """Compute a 256-bin histogram over the volume's own finite range.
+
+    Imaris reads the bins as spanning ``[HistogramMin, HistogramMax]``
+    (written alongside from the returned min/max), so the bins must use
+    that same range -- not the full dtype range, which would crush e.g.
+    12-bit data in uint16 into the first few bins. NaN/inf (common in
+    float results like ratios) are excluded instead of poisoning the range.
 
     Returns:
         (histogram_uint64, min_val, max_val)
     """
-    vmin = float(volume.min())
-    vmax = float(volume.max())
+    values = volume.ravel()
+    if values.dtype.kind == "f":
+        values = values[np.isfinite(values)]
+    hist = np.zeros(256, dtype=np.uint64)
+    if values.size == 0:
+        return hist, 0.0, 0.0
 
+    vmin = float(values.min())
+    vmax = float(values.max())
     if vmin == vmax:
-        hist = np.zeros(256, dtype=np.uint64)
-        hist[0] = volume.size
+        hist[0] = values.size
         return hist, vmin, vmax
 
-    # For integer types, use integer range
-    if np.issubdtype(volume.dtype, np.integer):
-        info = np.iinfo(volume.dtype)
-        hist, _ = np.histogram(
-            volume.ravel(),
-            bins=256,
-            range=(info.min, info.max),
-        )
-    else:
-        hist, _ = np.histogram(
-            volume.ravel(),
-            bins=256,
-            range=(vmin, vmax),
-        )
+    counts, _ = np.histogram(values, bins=256, range=(vmin, vmax))
+    return counts.astype(np.uint64), vmin, vmax
 
-    return hist.astype(np.uint64), vmin, vmax
+
+def _coerce_scale(scale):
+    """``(vz, vy, vx)`` floats from metadata, defaulting to 1.0 each."""
+    from ..io import coerce_scale_zyx
+
+    return coerce_scale_zyx(scale)
+
+
+def _resolve_timestamps(meta, T):
+    """One ``datetime`` per timepoint for ``DataSetInfo/TimeInfo``.
+
+    Imaris needs a timestamp for every timepoint, but the source often has
+    none (TIFF carries only a frame interval; ND2 may carry only relative
+    seconds). Fill each gap from the best information available, in order:
+    the timepoint's own timestamp (datetime or parseable string), its
+    ``timestamp_seconds`` offset, or its index times the frame interval --
+    all relative to one shared start time. With nothing to go on, every
+    gap gets that same start time, so a reader infers "no interval" rather
+    than the microsecond spacing of wall-clock write times.
+    """
+    from ..io import (
+        _extract_frame_interval_seconds,
+        _normalize_time_seconds_for_t,
+        _normalize_timestamps_for_t,
+    )
+
+    stamps = _normalize_timestamps_for_t(meta.get("timestamps"), T)
+    seconds = _normalize_time_seconds_for_t(meta.get("timestamp_seconds"), T)
+    seconds = seconds or [None] * T
+    interval = _extract_frame_interval_seconds(meta, T)
+
+    def offset(t):
+        if seconds[t] is not None:
+            return seconds[t]
+        if interval is not None:
+            return t * interval
+        return None
+
+    start = None
+    for t, ts in enumerate(stamps):
+        if ts is not None:
+            start = ts - timedelta(seconds=offset(t) or 0.0)
+            break
+    if start is None:
+        start = datetime.now().replace(microsecond=0)
+
+    out = []
+    for t, ts in enumerate(stamps):
+        if ts is None:
+            ts = start + timedelta(seconds=offset(t) or 0.0)
+        out.append(ts)
+    return out
 
 
 def _downsample_3d(volume, target_shape):
@@ -670,59 +524,3 @@ def _default_channel_color(index, total):
         "1.000 1.000 0.000",  # yellow
     ]
     return palette[index % len(palette)]
-
-
-def _generate_thumbnail(data_5d, size=256):
-    """Generate an RGBA thumbnail from 5D data.
-
-    Takes the mid-Z slice of the first timepoint, max-projects channels,
-    normalizes, and returns RGBA uint8 array.
-    """
-    T, Z, C, Y, X = data_5d.shape
-
-    # Mid-Z of first timepoint
-    mid_z = Z // 2
-    try:
-        slice_2d = np.asarray(data_5d[0, mid_z, :, :, :])  # (C, Y, X)
-    except Exception:
-        return np.zeros((size, size, 4), dtype=np.uint8)
-
-    # Max project across channels
-    if slice_2d.ndim == 3 and slice_2d.shape[0] > 1:
-        img = np.max(slice_2d, axis=0)  # (Y, X)
-    elif slice_2d.ndim == 3:
-        img = slice_2d[0]
-    else:
-        img = slice_2d
-
-    # Normalize to 0-255
-    img = img.astype(np.float32)
-    vmin, vmax = img.min(), img.max()
-    if vmax > vmin:
-        img = (img - vmin) / (vmax - vmin) * 255.0
-    img = np.clip(img, 0, 255).astype(np.uint8)
-
-    # Resize to thumbnail size
-    from scipy.ndimage import zoom
-
-    fy = size / img.shape[0]
-    fx = size / img.shape[1]
-    f = min(fy, fx)
-    img = zoom(img, f, order=1)
-
-    # Pad to exact size if needed
-    thumb = np.zeros((size, size), dtype=np.uint8)
-    oy = (size - img.shape[0]) // 2
-    ox = (size - img.shape[1]) // 2
-    thumb[oy : oy + img.shape[0], ox : ox + img.shape[1]] = img[
-        :size, :size
-    ]
-
-    # Convert to RGBA
-    rgba = np.zeros((size, size, 4), dtype=np.uint8)
-    rgba[:, :, 0] = thumb
-    rgba[:, :, 1] = thumb
-    rgba[:, :, 2] = thumb
-    rgba[:, :, 3] = 255
-
-    return rgba
