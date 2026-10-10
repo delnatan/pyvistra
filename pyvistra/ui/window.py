@@ -219,7 +219,15 @@ _CONTROLS_PANEL_HEIGHT = 140
 
 
 class ImageWindow(QMainWindow):
-    """Main image viewer window with ROI support."""
+    """Main image viewer window with ROI support.
+
+    Data ownership: a refcounted proxy passed in (constructor or
+    ``set_data``) is *taken over* -- the window releases one reference on
+    close/replacement without having acquired it. Callers that keep using
+    the proxy afterwards must ``acquire()`` on the window's behalf first
+    (as ``imshow`` and ``BufferProcessingRunner`` do); otherwise closing
+    the window closes their file or deletes their ``ImageBuffer``.
+    """
 
     # Every viewer class the Workspace hosts declares a class-level
     # MENU_SPEC; the workspace mirrors the active tab's spec onto its
@@ -4410,21 +4418,27 @@ def imshow(
         meta["scale"] = scale
 
     # Handle different data types
-    if isinstance(data, (Imaris5DProxy, Numpy5DProxy)):
-        # Already a 5D proxy, pass directly
-        pass
-    elif hasattr(data, "shape") and hasattr(data, "ndim") and data.ndim == 5:
-        # Generic 5D proxy-like object
-        pass
-    elif isinstance(data, np.ndarray):
-        # Numpy array, normalize to 5D
+    if isinstance(data, np.ndarray):
+        # Checked first: a 5D ndarray also matches the duck-typed branch.
         data = normalize_to_5d(data, dims=dims)
+    elif hasattr(data, "shape") and hasattr(data, "ndim") and data.ndim == 5:
+        # Existing 5D proxy the caller still holds (e.g. from load_image
+        # or an ImageBuffer): ImageWindow takes over one reference, so
+        # acquire one for it -- closing the window must not close the
+        # caller's file or delete their buffer.
+        if hasattr(data, "acquire"):
+            data = data.acquire()
     else:
         raise ValueError(
             "data must be a 5D proxy, numpy array, or other array-like object"
         )
 
-    viewer = ImageWindow(data, title=title_str, meta=meta)
+    try:
+        viewer = ImageWindow(data, title=title_str, meta=meta)
+    except Exception:
+        if hasattr(data, "release"):
+            data.release()
+        raise
 
     # Apply colormap(s) if specified
     if colormap is not None:
