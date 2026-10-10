@@ -175,59 +175,77 @@ class Numpy5DProxy(RefCountMixin):
 # Zarr-backed lazy proxy
 # ---------------------------------------------------------------------------
 
+# Axis order assumed for a plain (non-OME) zarr array of each rank -- the
+# same shape heuristics normalize_to_5d applies to in-memory arrays.
+_DEFAULT_ZARR_AXES = {2: "yx", 3: "zyx", 4: "zcyx", 5: "tzcyx"}
+_PYVISTRA_AXES = "tzcyx"
+
+
 class Zarr5DProxy(RefCountMixin):
     """
     Wraps a zarr array as a (T, Z, C, Y, X) 5D proxy.
 
-    The underlying zarr array may have 2–5 dimensions; singleton dimensions
-    are inserted as needed to present a consistent 5D interface.
+    ``axes`` names the stored array's axis order using letters from
+    ``"tzcyx"`` (e.g. ``"tczyx"`` for OME-Zarr); axes it lacks become
+    singletons. Defaults to the shape heuristic for the array's rank. Reads
+    always come back in pyvistra's order with every non-integer-indexed
+    axis present, exactly like slicing a 5D numpy array.
     """
 
-    def __init__(self, zarr_array, source_ndim):
+    def __init__(self, zarr_array, axes=None):
         self._store = zarr_array
-        self._source_ndim = source_ndim
         self.dtype = zarr_array.dtype
         self.ndim = 5
 
-        src = zarr_array.shape
-        if source_ndim == 2:
-            self.shape = (1, 1, 1, src[0], src[1])
-        elif source_ndim == 3:
-            self.shape = (1, src[0], 1, src[1], src[2])
-        elif source_ndim == 4:
-            self.shape = (1, src[0], src[1], src[2], src[3])
-        elif source_ndim == 5:
-            self.shape = src
-        else:
+        src = tuple(zarr_array.shape)
+        if axes is None or isinstance(axes, int):
+            # int: legacy ``source_ndim`` argument.
+            axes = _DEFAULT_ZARR_AXES.get(len(src))
+            if axes is None:
+                raise ValueError(
+                    f"Unsupported zarr array dimensionality: {len(src)}"
+                )
+        axes = axes.lower()
+        if (
+            len(axes) != len(src)
+            or len(set(axes)) != len(axes)
+            or not set(axes) <= set(_PYVISTRA_AXES)
+            or not {"y", "x"} <= set(axes)
+        ):
             raise ValueError(
-                f"Unsupported zarr array dimensionality: {source_ndim}"
+                f"Invalid axes {axes!r} for zarr array of shape {src}"
             )
+        self._axes = axes
+        self.shape = tuple(
+            src[axes.index(d)] if d in axes else 1 for d in _PYVISTRA_AXES
+        )
         self._init_refcount()
 
-    def _normalise_key(self, key):
+    def __getitem__(self, key):
         if not isinstance(key, tuple):
             key = (key,)
         if Ellipsis in key:
             idx = key.index(Ellipsis)
             n_expand = 5 - (len(key) - 1)
             key = key[:idx] + (slice(None),) * n_expand + key[idx + 1:]
-        if len(key) < 5:
-            key = key + (slice(None),) * (5 - len(key))
-        return key
+        key = key + (slice(None),) * (5 - len(key))
+        k5 = dict(zip(_PYVISTRA_AXES, key))
 
-    def _map_key(self, key_5d):
-        t, z, c, y, x = key_5d
-        if self._source_ndim == 2:
-            return (y, x)
-        elif self._source_ndim == 3:
-            return (z, y, x)
-        elif self._source_ndim == 4:
-            return (z, c, y, x)
-        return key_5d
+        out = np.asarray(self._store[tuple(k5[a] for a in self._axes)])
 
-    def __getitem__(self, key):
-        key_5d = self._normalise_key(key)
-        return np.asarray(self._store[self._map_key(key_5d)])
+        def kept(k):
+            return not isinstance(k, (int, np.integer))
+
+        # Axes still present, in stored order, then the missing (singleton)
+        # axes the caller sliced rather than indexed.
+        cur = [a for a in self._axes if kept(k5[a])]
+        for d in _PYVISTRA_AXES:
+            if d not in self._axes and kept(k5[d]):
+                out = np.expand_dims(out, -1)
+                if isinstance(k5[d], slice) and not range(*k5[d].indices(1)):
+                    out = out[..., :0]
+                cur.append(d)
+        return out.transpose([cur.index(d) for d in _PYVISTRA_AXES if d in cur])
 
     def close(self):
         if hasattr(self._store, "store") and hasattr(self._store.store, "close"):

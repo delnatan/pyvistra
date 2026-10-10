@@ -404,13 +404,80 @@ def normalize_to_5d(data, dims=None, rgb=None):
     return Numpy5DProxy(final_img)
 
 
+# OME-NGFF spatial units -> microns (pyvistra's scale unit).
+_OME_UNIT_TO_UM = {
+    "nanometer": 1e-3,
+    "micrometer": 1.0,
+    "millimeter": 1e3,
+    "centimeter": 1e4,
+    "meter": 1e6,
+}
+
+
+def _ome_multiscale(attrs):
+    """First ``multiscales`` entry of OME-NGFF metadata (v0.4 keeps it at
+    the top level, v0.5 under ``"ome"``), or None for plain zarr."""
+    ms = attrs.get("multiscales")
+    if ms is None and isinstance(attrs.get("ome"), dict):
+        ms = attrs["ome"].get("multiscales")
+    if isinstance(ms, list) and ms and isinstance(ms[0], dict):
+        return ms[0]
+    return None
+
+
+def _ome_axes_and_scale(multiscale):
+    """``(axes, scale_zyx)`` from an OME multiscale entry.
+
+    ``axes`` is a ``Zarr5DProxy`` axis string (e.g. ``"tczyx"``), or None
+    when the names don't map onto TZCYX. ``scale_zyx`` comes from the
+    highest-resolution dataset's ``scale`` transform, converted to microns
+    when a spatial unit is declared; None if absent.
+    """
+    names, units = [], {}
+    for ax in multiscale.get("axes") or []:
+        if isinstance(ax, dict):
+            name = str(ax.get("name", "")).lower()
+            if ax.get("unit"):
+                units[name] = str(ax["unit"]).lower()
+        else:  # v0.3: plain axis-name strings
+            name = str(ax).lower()
+        names.append(name)
+    axes = "".join(names)
+    if not names or any(len(n) != 1 for n in names) or len(set(axes)) != len(axes):
+        axes = None
+    elif not set(axes) <= set("tzcyx") or not {"y", "x"} <= set(axes):
+        axes = None
+
+    scale_zyx = None
+    datasets = multiscale.get("datasets") or []
+    transforms = datasets[0].get("coordinateTransformations", []) if datasets else []
+    for tr in transforms:
+        if tr.get("type") == "scale" and names and len(tr.get("scale", [])) == len(names):
+            per_axis = dict(zip(names, tr["scale"]))
+            scale_zyx = tuple(
+                float(per_axis.get(d, 1.0)) * _OME_UNIT_TO_UM.get(units.get(d), 1.0)
+                for d in "zyx"
+            )
+    return axes, scale_zyx
+
+
+def _ome_channel_names(attrs):
+    omero = attrs.get("omero")
+    if omero is None and isinstance(attrs.get("ome"), dict):
+        omero = attrs["ome"].get("omero")
+    channels = (omero or {}).get("channels") or []
+    return [ch.get("label") for ch in channels if isinstance(ch, dict)]
+
+
 def load_zarr(filepath):
     """
     Load a zarr array from a .zarr directory with lazy loading.
 
     Supports:
         - Standard zarr arrays (any dimensionality, normalized to 5D)
-        - OME-Zarr (multiscale, uses highest resolution from '0/')
+        - OME-Zarr (multiscale): reads the highest-resolution dataset with
+          the axis order, physical scale and channel labels its metadata
+          declares (OME axes are (t, c, z, y, x), not pyvistra's order)
 
     Args:
         filepath: Path to .zarr directory
@@ -423,58 +490,52 @@ def load_zarr(filepath):
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"Zarr file not found: {filepath}")
 
-    # Open zarr store
     store = zarr.open(filepath, mode="r")
+    attrs = dict(store.attrs) if hasattr(store, "attrs") else {}
+    multiscale = _ome_multiscale(attrs) if isinstance(store, zarr.Group) else None
 
-    # Check if it's a Group or Array
-    is_group = isinstance(store, zarr.Group)
-
-    # Find the zarr array to wrap (don't load data yet)
-    zarr_array = None
-    attrs = {}
-
-    if is_group and "0" in store:
-        # OME-Zarr: use highest resolution level
-        zarr_array = store["0"]
-        attrs = dict(store.attrs) if hasattr(store, "attrs") else {}
-    elif is_group:
-        # Group without '0' - look for a data array
-        for key in ["data", "array"]:
+    axes, ome_scale = None, None
+    if multiscale is not None:
+        datasets = multiscale.get("datasets") or [{}]
+        path = str(datasets[0].get("path", "0"))
+        if path not in store:
+            raise ValueError(f"OME-Zarr dataset {path!r} not found in {filepath}")
+        zarr_array = store[path]
+        axes, ome_scale = _ome_axes_and_scale(multiscale)
+    elif isinstance(store, zarr.Group):
+        zarr_array = None
+        for key in ["0", "data", "array", *store.keys()]:
             if key in store and isinstance(store[key], zarr.Array):
                 zarr_array = store[key]
                 break
         if zarr_array is None:
-            # Find first array in group
-            for key in store.keys():
-                if isinstance(store[key], zarr.Array):
-                    zarr_array = store[key]
-                    break
-        if zarr_array is None:
             raise ValueError(f"No array found in zarr group: {filepath}")
-        attrs = dict(store.attrs) if hasattr(store, "attrs") else {}
     else:
-        # Direct zarr array
         zarr_array = store
-        attrs = dict(store.attrs) if hasattr(store, "attrs") else {}
 
-    # Wrap in lazy proxy
-    source_ndim = len(zarr_array.shape)
-    proxy = Zarr5DProxy(zarr_array, source_ndim)
+    proxy = Zarr5DProxy(zarr_array, axes)
 
-    # Build metadata
     metadata = {
-        "filename": os.path.basename(filepath),
+        "filename": os.path.basename(filepath.rstrip("/")),
         "shape": proxy.shape,
         "is_rgb": False,
     }
 
-    # Extract scale from attrs if available
-    if "scale" in attrs:
+    if ome_scale is not None:
+        metadata["scale"] = ome_scale
+    elif "scale" in attrs:
         metadata["scale"] = tuple(attrs["scale"])
     elif "spacing" in attrs:
         metadata["scale"] = tuple(attrs["spacing"])
     else:
         metadata["scale"] = (1.0, 1.0, 1.0)
+
+    names = _ome_channel_names(attrs)
+    if names:
+        metadata["channels"] = [
+            {"id": i, "name": names[i] if i < len(names) and names[i] else f"Channel {i}"}
+            for i in range(proxy.shape[2])
+        ]
 
     # Copy other attrs to metadata
     for key, value in attrs.items():
