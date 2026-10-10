@@ -491,6 +491,14 @@ class SparseLabels:
 
         for label, arr in self._objects.items():
             data[f"coords_{label}"] = arr
+        if self._metadata:
+            # Same per-label metadata the zarr format keeps as attrs; JSON
+            # in a string array so loading never needs allow_pickle.
+            import json
+
+            data["metadata_json"] = np.array(
+                json.dumps({str(k): v for k, v in self._metadata.items()})
+            )
 
         np.savez_compressed(str(path), **data)
 
@@ -550,7 +558,7 @@ class SparseLabels:
         """Load from npz format."""
         data = np.load(str(path))
 
-        shape = tuple(data["shape"])
+        shape = tuple(int(s) for s in data["shape"])
         instance = cls(shape)
 
         # Extract labels from key names
@@ -558,6 +566,13 @@ class SparseLabels:
             if key.startswith("coords_"):
                 label = int(key[7:])  # Remove "coords_" prefix
                 instance._objects[label] = data[key]
+        if "metadata_json" in data.files:
+            import json
+
+            meta = json.loads(str(data["metadata_json"]))
+            instance._metadata = {
+                int(k): v for k, v in meta.items() if int(k) in instance._objects
+            }
 
         return instance
 

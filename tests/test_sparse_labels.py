@@ -61,3 +61,17 @@ def test_add_pixels_rejects_out_of_bounds(ys, xs):
         labels.add_pixels(2, (np.array(ys), np.array(xs)))  # new label too
 
     assert labels.labels == [1] and labels.area(1) == 1
+
+
+def test_npz_roundtrip_keeps_metadata_like_zarr(tmp_path):
+    """Regression: .sparse.npz dropped the per-label metadata that
+    .sparse.zarr preserves (so zarr -> npz conversion lost it)."""
+    labels = _labels_with((1, ([0], [0])), (4, ([2, 3], [2, 3])))
+    labels._metadata = {4: {"class": "nucleus", "score": 0.9}}
+
+    for name in ("x.sparse.zarr", "x.sparse.npz"):
+        labels.save(tmp_path / name)
+        loaded = SparseLabels.from_file(tmp_path / name)
+        assert loaded._metadata == {4: {"class": "nucleus", "score": 0.9}}
+        assert loaded.shape == (10, 10) and type(loaded.shape[0]) is int
+        np.testing.assert_array_equal(loaded.to_dense(), labels.to_dense())
