@@ -14,10 +14,11 @@
 
 These are available in the application and toolbar/dialog workflow:
 
-- gel analysis workflow
-- line profile dialog workflow
-- PSF/transform/alignment dialogs
-- annotation manager panel interactions
+- line/radial profile and kymograph dialogs
+- transform/alignment dialogs
+- Layer Manager and Label Manager panel interactions
+- plugin dialogs (e.g. gel analysis from `gelkit`, PSF tools from `psfkit`,
+  deconvolution from `resolvde`) once those packages are installed
 
 These can still be combined with scripting by loading data in Python first and then opening viewers, but they are designed primarily around GUI interactions.
 

@@ -88,11 +88,15 @@ Point tables can also be loaded/saved as CSV/JSON with
 
 - `size_mode="image"` makes boxes scale with zoom (data-space size).
 - `size_mode="screen"` keeps boxes fixed in display pixels.
-- Use the Annotation Manager inspector to change:
+- In the Layer Manager, right-click a points layer and choose
+  **Display Settings…** to change:
   - layer and selected-point colors
   - box size, edge width, cross visibility
   - canvas labels (`label_template`) vs tooltip-only mode
-- Use **Promote to PointROI** for focused handle-based adjustment of a selected point.
+- **Inspect Properties…** (same menu) browses and filters the per-point
+  property columns.
+- With the pointer tool, click a point to focus it; drag the focused point
+  (or its handles) to adjust it.
 
 ## Practical reminder
 

@@ -1,14 +1,15 @@
 ---
 name: verify
-description: Manually run pyvistra's Qt/vispy GUI to observe a change end-to-end (no automated GUI test suite exists yet).
+description: Manually run pyvistra's Qt/vispy GUI to observe a change end-to-end, beyond what the pytest suite covers.
 ---
 
 # Verifying pyvistra GUI changes
 
-pyvistra is a PyQt6 (via `qtpy`) + vispy desktop app. There is no
-pytest-qt harness — `tests/` covers pure-data modules only. Verification
-of UI/viewer changes means actually constructing and driving the real
-widgets, following the pattern already used in `scripts/verify_*.py`.
+pyvistra is a PyQt6 (via `qtpy`) + vispy desktop app. `tests/` includes
+GUI-level regression tests (real windows via `imshow` under offscreen Qt,
+e.g. `tests/test_live_buffer.py`, `tests/test_label_painting.py`), but
+verifying a UI/viewer change still means constructing and driving the real
+widgets through the paths a user would take, in a throwaway script.
 
 ## Recipe
 
@@ -43,6 +44,17 @@ Run with the project venv: `.venv/bin/python <script>`.
   `data/thumbnail_cache.py`) delivers via queued Qt signals — poll with
   a short `time.sleep` + `app.processEvents()` loop and a deadline
   rather than a single `processEvents()` call.
+- Don't emit vispy canvas events (`canvas.events.mouse_press(...)`)
+  under offscreen Qt: vispy's picking pass renders with GL and segfaults
+  without a real context. Call the window's own handlers instead, e.g.
+  `win.on_mouse_press(vispy.app.canvas.MouseEvent("mouse_press",
+  pos=..., button=1))`, mapping image coords to canvas coords via
+  `win.canvas.scene.node_transform(win.renderer.layers[0]).imap(...)`.
+- Closed windows are deleted via `deleteLater`, which `processEvents()`
+  alone doesn't run outside an event loop; also call
+  `app.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)` when
+  checking that something was freed.
+- Real sample data: a CZI in `tests/data/`; anything else, generate.
 - Generate throwaway test images with Pillow/numpy directly in the
   script (`tempfile.mkdtemp()`), don't rely on fixture files.
 - Clean up temp dirs (`shutil.rmtree`) and call `viewer.close()` when

@@ -10,9 +10,8 @@ state mutations from any source — programmatic or another widget —
 update the UI automatically. The panel writes user input back through
 the same list, which propagates to the underlying vispy layers.
 
-This module replaces the old ``ContrastDialog`` + ``ChannelPanel``
-pair. The single-channel "big histogram" view is intentionally
-omitted; the per-row compact histogram covers the common case.
+There is deliberately no single-channel "big histogram" view; the
+per-row compact histogram covers the common case.
 """
 
 import numpy as np

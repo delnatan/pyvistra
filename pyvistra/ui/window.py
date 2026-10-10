@@ -217,7 +217,8 @@ _CONTROLS_PANEL_HEIGHT = 140
 
 
 class ImageWindow(QMainWindow):
-    """Main image viewer window with ROI support.
+    """Main 5D image viewer window: slicing/projection, channels, and the
+    shape, mask, point and track layers drawn over the image.
 
     Data ownership: a refcounted proxy passed in (constructor or
     ``set_data``) is *taken over* -- the window releases one reference on

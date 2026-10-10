@@ -422,7 +422,8 @@ class Toolbar(QMainWindow):
             except Exception:
                 pass
 
-        # Now close all managed windows - their signals won't trigger ROI Manager updates
+        # Close every managed window (dialogs above were told to stop
+        # reacting first, so these closes don't trigger their refreshes).
         windows = list(manager.get_all().values())
         for w in windows:
             w.close()

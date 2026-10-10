@@ -46,9 +46,11 @@ nothing depends on one reader knowing about another.
   `ObservableBuffer` (`data/protocols.py`) are structural-typing contracts so
   a plugin can type-check against pyvistra without importing its concrete
   proxy classes.
-- **Command pattern** (`layers/commands.py`) — every reversible mutation
-  (shape edit, label paint, track edit) goes through an `UndoStack` owned by
-  the `Layer`, not through ad-hoc undo flags.
+- **Command pattern** (`layers/commands.py`) — reversible mutations (shape,
+  point and track edits) go through an `UndoStack` owned by the `Layer`, not
+  through ad-hoc undo flags. Label painting is the exception: brush/fill
+  strokes mutate `SparseLabels` directly and can't be undone yet (see
+  TODO.md, "Audit follow-ups").
 - **subscribe/notify state objects** — `ChannelDisplayList`, `ViewState`,
   `OverlayState` are the "one owner, many subscribers" pattern for state that
   used to be duplicated across renderers (composite image, volume, tiled,
