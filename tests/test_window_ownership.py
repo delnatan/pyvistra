@@ -67,3 +67,21 @@ def test_toolbar_forgets_closed_windows():
     assert toolbar.open_windows == []
     assert data_ref() is None
     toolbar.close()
+
+
+def test_window_title_shows_small_pixel_sizes(tmp_path):
+    """Regression: the title used .2f, so a 0.065 um pixel read "0.06"."""
+    import tifffile
+
+    path = tmp_path / "cal.tif"
+    tifffile.imwrite(
+        path, np.zeros((8, 8), np.uint16), imagej=True,
+        resolution=(1 / 0.065, 1 / 0.065), metadata={"unit": "um"},
+    )
+    from pyvistra.ui.window import ImageWindow
+
+    win = ImageWindow(str(path))
+    try:
+        assert "[0.065 x 0.065 µm]" in win.windowTitle()
+    finally:
+        win.close()

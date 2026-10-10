@@ -324,7 +324,9 @@ class ImageWindow(QMainWindow):
         title_str = f"[{self.window_id}] {filename} "
         title_str += f"[{self.X}x{self.Y} px] "
         if self.filepath:
-            title_str += f"[{sx:.2f} x {sy:.2f} \u00b5m]"
+            # 3 significant digits: sub-0.1 um pixels (0.065, 0.0346) must not
+            # round to "0.06"/"0.03".
+            title_str += f"[{sx:.3g} x {sy:.3g} \u00b5m]"
         self.setWindowTitle(title_str)
 
         # 2. Main Layout
