@@ -908,7 +908,7 @@ class LineProfileDialog(WindowSeriesMixin, QDialog):
 
         try:
             with open(path, "w", newline="") as f:
-                f.write(f"# Line Profile\n")
+                f.write("# Line Profile\n")
                 f.write(f"# p1_xy: ({p1[0]:.2f}, {p1[1]:.2f})\n")
                 f.write(f"# p2_xy: ({p2[0]:.2f}, {p2[1]:.2f})\n")
                 if scale_yx is not None:
@@ -917,7 +917,7 @@ class LineProfileDialog(WindowSeriesMixin, QDialog):
                 if has_um:
                     f.write(f"# line_{phys_length_key}: {float(distances_um[-1]):.4f}\n")
                 f.write(f"# all_channels: {self.all_channels_cb.isChecked()}\n")
-                f.write(f"#\n")
+                f.write("#\n")
 
                 col_labels = []
                 for s in visible:

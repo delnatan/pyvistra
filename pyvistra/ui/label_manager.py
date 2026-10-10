@@ -784,8 +784,3 @@ def get_label_manager():
     if _label_manager_instance is None:
         _label_manager_instance = LabelManager()
     return _label_manager_instance
-
-
-def label_manager_exists():
-    """Check if LabelManager singleton has been created."""
-    return _label_manager_instance is not None

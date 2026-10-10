@@ -751,10 +751,6 @@ class Workspace(QMainWindow):
         super().closeEvent(event)
 
 
-def workspace_exists():
-    return _workspace is not None
-
-
 def get_workspace():
     """Return the workspace singleton, creating it on first use."""
     global _workspace

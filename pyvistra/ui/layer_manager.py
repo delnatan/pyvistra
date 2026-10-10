@@ -737,8 +737,3 @@ def show_layer_manager(window=None):
     lm.show()
     lm.raise_()
     return lm
-
-
-def layer_manager_exists() -> bool:
-    """Check if a layer manager instance exists."""
-    return _layer_manager is not None

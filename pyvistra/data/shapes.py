@@ -470,22 +470,6 @@ def get_outline(rec: ShapeRecord, n_circle_pts: int = 64) -> np.ndarray:
     return np.empty((0, 2), dtype=np.float32)
 
 
-def square_from_corner(
-    fx: float, fy: float, x: float, y: float
-) -> tuple[float, float]:
-    """Constrain (x, y) so the rect anchored at (fx, fy) is a square.
-
-    Uses the larger of |x-fx|, |y-fy| as the side length and preserves
-    each delta's sign, so the square grows toward the pointer no matter
-    the quadrant.
-    """
-    dx, dy = x - fx, y - fy
-    s = max(abs(dx), abs(dy))
-    sx = 1.0 if dx >= 0 else -1.0
-    sy = 1.0 if dy >= 0 else -1.0
-    return (fx + sx * s, fy + sy * s)
-
-
 def integer_square_from_corner(
     fx: float, fy: float, x: float, y: float
 ) -> tuple[float, float]:

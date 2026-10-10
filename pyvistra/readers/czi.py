@@ -268,7 +268,3 @@ class CZIReader:
             f"  Voxel Size (um): {self.voxel_size}\n"
             f"  Channels: {[c['name'] for c in self.channels_info]}>"
         )
-
-
-if __name__ == "__main__":
-    print("CZI Reader Module Loaded.")

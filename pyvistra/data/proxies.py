@@ -197,8 +197,7 @@ class Zarr5DProxy(RefCountMixin):
         self.ndim = 5
 
         src = tuple(zarr_array.shape)
-        if axes is None or isinstance(axes, int):
-            # int: legacy ``source_ndim`` argument.
+        if axes is None:
             axes = _DEFAULT_ZARR_AXES.get(len(src))
             if axes is None:
                 raise ValueError(

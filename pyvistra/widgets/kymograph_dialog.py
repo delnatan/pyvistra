@@ -72,12 +72,6 @@ def _sample_coords(rec, num_points: int) -> np.ndarray:
     raise ValueError(f"Unsupported shape type for kymograph: {rec.shape_type!r}")
 
 
-def _path_length(rec) -> float:
-    coords = _sample_coords(rec, calibration.samples_for_length(_raw_pixel_length(rec)))
-    seg = np.diff(coords, axis=0)
-    return float(np.hypot(seg[:, 0], seg[:, 1]).sum())
-
-
 def _raw_pixel_length(rec) -> float:
     if rec.shape_type == LINE:
         p = rec.params

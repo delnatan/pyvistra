@@ -237,7 +237,6 @@ class ImageWindow(QMainWindow):
     window_shown = Signal(object)  # Emits self when window is shown
     window_closing = Signal(object)  # Emits self when window is closing
     roi_added = Signal(object)  # Emits the ROI that was added
-    roi_removed = Signal(object)  # Emits the ROI that was removed
     roi_selection_changed = Signal(object)  # Emits the selected ROI (or None)
     roi_modified = Signal(object)  # Emits ROI when it's being modified (dragged)
     view_changed = Signal(object)  # Emits self when displayed slice/channel changes
@@ -1268,7 +1267,7 @@ class ImageWindow(QMainWindow):
 
         print()
         print(f"Frames saved to: {output_dir}")
-        print(f"To make a movie:")
+        print("To make a movie:")
         print(
             f"  ffmpeg -framerate 10 -i {output_dir}/{prefix}_%04d.{ext}"
             f" -c:v libx264 -pix_fmt yuv420p output.mp4"
@@ -3424,7 +3423,6 @@ class ImageWindow(QMainWindow):
             self.z_range_slider.setRange(0, self.Z - 1)
             self.z_range_slider.setValue((0, self.Z - 1))
             self.z_range_slider.barIsVisible = True
-            self.z_range_slider.barIsEnabled = True
             self.z_range_slider.barIsEnabled = False
 
             self.z_range_slider_layout.addWidget(self.z_range_slider_min_label)
