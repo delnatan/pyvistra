@@ -115,3 +115,40 @@ def test_save_tiff_labels_real_space_scale_as_um(tmp_path):
         ij = tif.imagej_metadata or {}
 
     assert ij.get("unit") == "um"
+
+
+class _FakeND2:
+    """Minimal stand-in for nd2.ND2File's per-frame time API."""
+
+    def __init__(self, sizes, rel_ms):
+        loops = [k for k in sizes if k in ("P", "T", "Z")]
+        import itertools
+
+        self.loop_indices = [
+            dict(zip(loops, idx))
+            for idx in itertools.product(*(range(sizes[k]) for k in loops))
+        ]
+        self._rel_ms = rel_ms
+
+    def frame_metadata(self, seq_idx):
+        ms = self._rel_ms(self.loop_indices[seq_idx])
+        return {"channels": [{"time": {"relativeTimeMs": ms}}]}
+
+
+def test_nd2_timestamps_follow_collapsed_position_loop():
+    """Regression: with a P loop folded into T, timestamps were keyed by the
+    raw "T" loop index -- position 1's frames got position 0's slots and
+    every slot past n_T stayed empty."""
+    from pyvistra.io import _extract_nd2_timestamp_seconds
+
+    sizes = {"P": 2, "T": 3, "Z": 2, "C": 1, "Y": 4, "X": 4}
+    # Each (p, t) acquired at t*10 s + p*1 s; Z frames a few ms later.
+    fake = _FakeND2(sizes, lambda i: (i["T"] * 10 + i["P"]) * 1000 + i["Z"] * 5)
+
+    secs = _extract_nd2_timestamp_seconds(fake, sizes)
+
+    # pyvistra T index = p * n_T + t (same order as _normalize_nd2_to_5d).
+    assert secs == [0.0, 10.0, 20.0, 1.0, 11.0, 21.0]
+    data = np.zeros((2, 3, 2, 1, 4, 4), np.uint16)
+    out, _ = _normalize_nd2_to_5d(data, sizes)
+    assert out.shape[0] == len(secs)

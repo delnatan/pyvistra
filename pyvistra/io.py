@@ -693,22 +693,36 @@ def _normalize_nd2_to_5d(data, sizes):
     return normalized, collapsed_dims
 
 
-def _extract_nd2_timestamp_seconds(nd2_file, t_size):
-    """Extract per-timepoint relative acquisition times in seconds."""
+def _extract_nd2_timestamp_seconds(nd2_file, sizes):
+    """Extract relative acquisition times (seconds) per pyvistra T index.
+
+    ``_normalize_nd2_to_5d`` folds every non-Z/C/Y/X loop (T, P, ...) into
+    T, in file order, so a frame's T index is its loop indices raveled
+    over those same dims -- not its raw ``"T"`` loop index, which would
+    misplace (and drop) every position after the first.
+    """
     loop_indices = getattr(nd2_file, "loop_indices", None) or []
     if not loop_indices:
         return []
 
-    # ND2 sequence indices are per-frame and may include Z/C/P loops.
-    # We keep first observed time per T index.
+    time_keys = [str(k) for k in sizes if str(k).lower() not in {"x", "y", "z", "c"}]
+    time_shape = [int(sizes[k]) for k in time_keys]
+    t_size = int(np.prod(time_shape, dtype=np.int64)) if time_keys else 1
+
+    # Sequence indices are per-frame and include Z/C loops too; keep the
+    # first observed time per T index.
     t_seconds = [None] * t_size
     for seq_idx, index_map in enumerate(loop_indices):
-        t_idx = None
-        if isinstance(index_map, dict):
-            t_idx = index_map.get("T")
-        else:
-            t_idx = getattr(index_map, "get", lambda *_: None)("T")
-        if t_idx is None or t_idx >= t_size or t_seconds[t_idx] is not None:
+        get = index_map.get if hasattr(index_map, "get") else (lambda *_: None)
+        try:
+            t_idx = int(
+                np.ravel_multi_index(
+                    [int(get(k, 0) or 0) for k in time_keys], time_shape
+                )
+            ) if time_keys else 0
+        except (TypeError, ValueError):
+            continue
+        if t_seconds[t_idx] is not None:
             continue
 
         try:
@@ -816,9 +830,11 @@ def load_nd2(filepath):
         n_channels = normalized.shape[2]
         channels = _extract_nd2_channels(metadata_obj, n_channels)
 
-        rel_seconds = _extract_nd2_timestamp_seconds(
-            f, normalized.shape[0]
-        )
+        rel_seconds = _extract_nd2_timestamp_seconds(f, sizes)
+        if len(rel_seconds) != normalized.shape[0]:
+            # sizes didn't describe the array (heuristic normalization
+            # fallback), so frame -> T mapping is unknown; don't guess.
+            rel_seconds = []
         acquisition_start = _parse_nd2_acquisition_start(text_info)
         timestamps = _build_nd2_timestamps(acquisition_start, rel_seconds)
 
