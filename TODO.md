@@ -41,10 +41,11 @@ also turned up. Unordered; none is blocking.
       for smoothed polylines). Rasterize within the shape's bounding box
       (e.g. `skimage.draw.polygon`, already a dependency), keeping the
       pixel-center convention (`calibration.PIXEL_CENTER_OFFSET`).
-- [ ] **Sweep stale `~/.pyvistra/buffers`.** `ImageBuffer` stores are
-      deleted on release, but a crash leaves them on disk forever. Remove
-      orphaned `*.zarr` dirs at startup (skip any still in use by another
-      running instance).
+- [x] **Sweep stale `~/.pyvistra/buffers`.** Done: stores now live in a
+      per-process `buffers/<pid>/` dir, removed at exit; app startup (and a
+      process's first `ImageBuffer`) sweeps dirs whose process is gone,
+      plus legacy top-level stores older than a day
+      (`data/buffer.py:sweep_stale_buffers`).
 
 ---
 
