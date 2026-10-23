@@ -2,6 +2,7 @@ from datetime import datetime
 
 import numpy as np
 from vispy import scene
+from vispy.geometry import Rect
 
 DISTANCE_TO_UM = {
     "nm": 1e-3,
@@ -107,8 +108,36 @@ class ScaleTimestampOverlay:
             self.axis_spacing_um = float(spacing_um)
         self.update()
 
+    def _visible_rect(self):
+        """World-space rect actually shown in the viewport.
+
+        ``camera.rect`` is the *requested* rect; with a locked aspect ratio
+        PanZoomCamera pads one axis so the viewport is filled, so anchoring
+        to ``camera.rect`` misplaces overlays whenever the viewport and the
+        requested rect have different shapes (e.g. zoomed into a tall image).
+        """
+        camera = self.view.camera
+        rect = getattr(camera, "rect", None)
+        if rect is None or rect.width <= 0 or rect.height <= 0:
+            return None
+        aspect = getattr(camera, "aspect", None)
+        vw, vh = self.view.size
+        if not aspect or vw <= 0 or vh <= 0:
+            return rect
+
+        # Same rule vispy applies in PanZoomCamera._update_transform.
+        constrained_aspect = abs((vw / vh) / aspect)
+        left, bottom, width, height = rect.left, rect.bottom, rect.width, rect.height
+        if width / height > constrained_aspect:
+            height = width / constrained_aspect
+            bottom = rect.center[1] - height / 2
+        else:
+            width = height * constrained_aspect
+            left = rect.center[0] - width / 2
+        return Rect(left, bottom, width, height)
+
     def update(self):
-        rect = getattr(self.view.camera, "rect", None)
+        rect = self._visible_rect()
         if rect is None or rect.width <= 0 or rect.height <= 0:
             self._line.visible = False
             self._scale_text.visible = False
