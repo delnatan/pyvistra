@@ -485,9 +485,11 @@ class TileWidget(QFrame):
         self.view.camera = "panzoom"
         self.view.camera.aspect = 1
 
-        # Connect to canvas events for camera sync (wheel=zoom, release=end of pan)
-        self.canvas.events.mouse_wheel.connect(self._on_camera_change)
-        self.canvas.events.mouse_release.connect(self._on_camera_change)
+        # Follow the camera's own transform rather than wheel/release
+        # events: vispy runs later-connected canvas callbacks *before* the
+        # camera moves, so those always reported the previous view.
+        self._last_camera_rect = None
+        self.view.camera.transform.changed.connect(self._on_camera_change)
         # Click-to-select (canvas covers most of the tile's area, so
         # selection needs its own hook independent of mousePressEvent).
         self.canvas.events.mouse_press.connect(self._on_canvas_mouse_press)
@@ -647,12 +649,25 @@ class TileWidget(QFrame):
         """Reset camera to fit image."""
         if self.data is not None:
             _, _, _, h, w = self.data.shape
-            self.view.camera.set_range(x=(0, w), y=(0, h), margin=0.02)
-            self.view.camera.flip = (False, True, False)
+            # Fitting is per-tile (tiles may hold different-size images), so
+            # it must never be broadcast as a sync.
+            self._ignore_camera_events = True
+            try:
+                self.view.camera.set_range(x=(0, w), y=(0, h), margin=0.02)
+                self.view.camera.flip = (False, True, False)
+            finally:
+                self._ignore_camera_events = False
             self.canvas.update()
 
     def _on_camera_change(self, event):
         """Handle camera change event (pan/zoom changed)."""
+        # The transform also changes on tile resize/flip, which leave the
+        # requested rect alone; only an actual pan/zoom is worth syncing.
+        rect = self.view.camera.rect
+        key = (*rect.pos, *rect.size)
+        if key == self._last_camera_rect:
+            return
+        self._last_camera_rect = key
         if self._ignore_camera_events:
             return
         if self._camera_change_callback is not None:

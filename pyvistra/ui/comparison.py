@@ -60,9 +60,7 @@ class ComparisonPair(QObject):
             self._connect(window.window_activated, self._on_member_activated)
             self._connect(window.window_closing, self._on_member_closing)
 
-            camera_handler = lambda event, w=window: self._on_camera_event(w)
-            self._connect(window.canvas.events.mouse_wheel, camera_handler)
-            self._connect(window.canvas.events.mouse_release, camera_handler)
+            self._connect(window.camera_changed, self._on_camera_event)
 
             channel_handler = lambda c, w=window: self._on_channel_changed(w)
             self._connect(window.channel_changed, channel_handler)
@@ -110,7 +108,6 @@ class ComparisonPair(QObject):
         self._syncing_view = True
         try:
             target.view.camera.rect = source.view.camera.rect
-            target.canvas.update()
         finally:
             self._syncing_view = False
 

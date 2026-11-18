@@ -2,7 +2,6 @@ from datetime import datetime
 
 import numpy as np
 from vispy import scene
-from vispy.geometry import Rect
 
 DISTANCE_TO_UM = {
     "nm": 1e-3,
@@ -60,11 +59,15 @@ class ScaleTimestampOverlay:
         if config:
             self.config.update(config)
 
+        # Overlays live in the ViewBox's own pixel space (origin top-left,
+        # +y down) rather than in view.scene. Corners then mean screen
+        # corners regardless of camera flip/pan/zoom, and text anchors can
+        # be chosen per corner so text always grows *into* the viewport.
         self._line = scene.visuals.Line(
             pos=np.array([[0.0, 0.0], [1.0, 0.0]], dtype=np.float32),
             color=(1, 1, 1, 0.95),
             width=3,
-            parent=self.view.scene,
+            parent=self.view,
         )
         self._scale_text = scene.visuals.Text(
             text="",
@@ -72,7 +75,7 @@ class ScaleTimestampOverlay:
             anchor_x="center",
             anchor_y="bottom",
             font_size=11,
-            parent=self.view.scene,
+            parent=self.view,
         )
         self._time_text = scene.visuals.Text(
             text="",
@@ -80,7 +83,7 @@ class ScaleTimestampOverlay:
             anchor_x="left",
             anchor_y="top",
             font_size=11,
-            parent=self.view.scene,
+            parent=self.view,
         )
 
         self._line.order = 10_000
@@ -108,44 +111,22 @@ class ScaleTimestampOverlay:
             self.axis_spacing_um = float(spacing_um)
         self.update()
 
-    def _visible_rect(self):
-        """World-space rect actually shown in the viewport.
-
-        ``camera.rect`` is the *requested* rect; with a locked aspect ratio
-        PanZoomCamera pads one axis so the viewport is filled, so anchoring
-        to ``camera.rect`` misplaces overlays whenever the viewport and the
-        requested rect have different shapes (e.g. zoomed into a tall image).
-        """
-        camera = self.view.camera
-        rect = getattr(camera, "rect", None)
-        if rect is None or rect.width <= 0 or rect.height <= 0:
-            return None
-        aspect = getattr(camera, "aspect", None)
-        vw, vh = self.view.size
-        if not aspect or vw <= 0 or vh <= 0:
-            return rect
-
-        # Same rule vispy applies in PanZoomCamera._update_transform.
-        constrained_aspect = abs((vw / vh) / aspect)
-        left, bottom, width, height = rect.left, rect.bottom, rect.width, rect.height
-        if width / height > constrained_aspect:
-            height = width / constrained_aspect
-            bottom = rect.center[1] - height / 2
-        else:
-            width = height * constrained_aspect
-            left = rect.center[0] - width / 2
-        return Rect(left, bottom, width, height)
+    def _pixels_per_world_x(self):
+        """Screen pixels spanned by one world unit along x (0 if unknown)."""
+        transform = getattr(self.view.camera, "transform", None)
+        scale = getattr(transform, "scale", None)
+        return float(abs(scale[0])) if scale is not None else 0.0
 
     def update(self):
-        rect = self._visible_rect()
-        if rect is None or rect.width <= 0 or rect.height <= 0:
+        w, h = self.view.size
+        if w <= 0 or h <= 0:
             self._line.visible = False
             self._scale_text.visible = False
             self._time_text.visible = False
             return
 
-        self._update_scale_bar(rect)
-        self._update_timestamp(rect)
+        self._update_scale_bar(w, h)
+        self._update_timestamp(w, h)
 
     def remove(self):
         for visual in (self._line, self._scale_text, self._time_text):
@@ -154,7 +135,7 @@ class ScaleTimestampOverlay:
             except Exception:
                 pass
 
-    def _update_scale_bar(self, rect):
+    def _update_scale_bar(self, w, h):
         if not self.config.get("show_scale_bar", False):
             self._line.visible = False
             self._scale_text.visible = False
@@ -162,8 +143,8 @@ class ScaleTimestampOverlay:
 
         length = float(self.config.get("scale_bar_length", 0.0) or 0.0)
         unit = str(self.config.get("scale_bar_unit", "um"))
-        world_len = self._distance_to_world(length, unit)
-        if world_len <= 0:
+        px_len = self._distance_to_world(length, unit) * self._pixels_per_world_x()
+        if px_len <= 0:
             self._line.visible = False
             self._scale_text.visible = False
             return
@@ -171,11 +152,9 @@ class ScaleTimestampOverlay:
         anchor = str(self.config.get("scale_anchor", "bottom-left"))
         ox = float(self.config.get("scale_offset_x", 0.04))
         oy = float(self.config.get("scale_offset_y", 0.06))
-        x0, y0 = self._anchor_point(rect, anchor, ox, oy)
+        x0, y0 = _anchor_point(w, h, anchor, ox, oy)
 
-        is_right = "right" in anchor
-        is_top = "top" in anchor
-        x1 = x0 - world_len if is_right else x0 + world_len
+        x1 = x0 - px_len if "right" in anchor else x0 + px_len
         line_color = self._normalize_color(
             self.config.get("scale_color", (1.0, 1.0, 1.0, 0.95))
         )
@@ -186,14 +165,20 @@ class ScaleTimestampOverlay:
         )
         self._line.visible = True
 
+        # Label sits on the side of the bar facing the viewport interior.
+        gap = 8.0
+        if "top" in anchor:
+            self._scale_text.anchors = ("center", _grow_down_anchor_y(True))
+            ty = y0 + gap
+        else:
+            self._scale_text.anchors = ("center", _grow_down_anchor_y(False))
+            ty = y0 - gap
         self._scale_text.text = f"{length:g} {unit}"
         self._scale_text.color = line_color
-        # Keep Text anchors fixed; adjust offset direction instead.
-        text_dy = -rect.height * 0.03 if is_top else rect.height * 0.015
-        self._scale_text.pos = ((x0 + x1) * 0.5, y0 + text_dy, 0)
+        self._scale_text.pos = ((x0 + x1) * 0.5, ty)
         self._scale_text.visible = True
 
-    def _update_timestamp(self, rect):
+    def _update_timestamp(self, w, h):
         if not self.config.get("show_timestamp", False):
             self._time_text.visible = False
             return
@@ -206,14 +191,15 @@ class ScaleTimestampOverlay:
         anchor = str(self.config.get("timestamp_anchor", "top-left"))
         ox = float(self.config.get("timestamp_offset_x", 0.04))
         oy = float(self.config.get("timestamp_offset_y", 0.06))
-        tx, ty = self._anchor_point(rect, anchor, ox, oy)
+        tx, ty = _anchor_point(w, h, anchor, ox, oy)
         color = self._normalize_color(
             self.config.get("timestamp_color", (1.0, 1.0, 1.0, 0.95))
         )
 
+        self._time_text.anchors = _text_anchors(anchor)
         self._time_text.color = color
         self._time_text.text = t_text
-        self._time_text.pos = (tx, ty, 0)
+        self._time_text.pos = (tx, ty)
         self._time_text.visible = True
 
     def _distance_to_world(self, value, unit):
@@ -320,23 +306,6 @@ class ScaleTimestampOverlay:
 
         return out
 
-    def _anchor_point(self, rect, anchor, ox, oy):
-        ox = min(max(float(ox), 0.0), 1.0)
-        oy = min(max(float(oy), 0.0), 1.0)
-        anchor = str(anchor or "top-left")
-
-        if "right" in anchor:
-            x = rect.right - rect.width * ox
-        else:
-            x = rect.left + rect.width * ox
-
-        if "bottom" in anchor:
-            y = rect.bottom + rect.height * oy
-        else:
-            y = rect.top - rect.height * oy
-
-        return x, y
-
     def _normalize_color(self, color):
         if (
             isinstance(color, (list, tuple))
@@ -345,3 +314,33 @@ class ScaleTimestampOverlay:
         ):
             return tuple(min(max(float(c), 0.0), 1.0) for c in color)
         return (1.0, 1.0, 1.0, 0.95)
+
+
+def _anchor_point(w, h, anchor, ox, oy):
+    """Pixel position for ``anchor`` in a ``w`` x ``h`` viewport (+y down).
+
+    ``ox``/``oy`` are insets from the anchored edges as viewport fractions.
+    """
+    ox = min(max(float(ox), 0.0), 1.0)
+    oy = min(max(float(oy), 0.0), 1.0)
+    anchor = str(anchor or "top-left")
+    x = w * (1.0 - ox) if "right" in anchor else w * ox
+    y = h * (1.0 - oy) if "bottom" in anchor else h * oy
+    return x, y
+
+
+def _text_anchors(anchor):
+    """Text (anchor_x, anchor_y) so the text extends away from the corner."""
+    anchor = str(anchor or "top-left")
+    ax = "right" if "right" in anchor else "left"
+    return ax, _grow_down_anchor_y("bottom" not in anchor)
+
+
+def _grow_down_anchor_y(grow_down):
+    """vispy Text ``anchor_y`` that makes text extend downward on screen.
+
+    Text anchors assume a y-up frame; overlay coordinates are y-down
+    ViewBox pixels, so the names invert: "bottom" puts the glyphs *below*
+    ``pos`` on screen.
+    """
+    return "bottom" if grow_down else "top"

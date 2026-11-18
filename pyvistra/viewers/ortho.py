@@ -360,34 +360,21 @@ class OrthoViewer(QMainWindow):
         self.update_views()
         self.reset_cameras()
 
-        # Camera Synchronization
-        # Connect to mouse events to sync cameras after zoom/pan operations
+        # Camera Synchronization: follow each camera's own transform, not
+        # the mouse/resize events that drive it -- vispy runs later-connected
+        # canvas callbacks *before* the camera moves, so those always synced
+        # the previous view. _syncing_cameras stops the views we update
+        # from re-syncing in turn.
         self._syncing_cameras = False
 
-        def make_camera_handler(view_name):
-            def handler(e):
-                self._on_camera_change(view_name)
-
-            return handler
-
-        for canvas, view_name in [
-            (self.canvas_yx, "yx"),
-            (self.canvas_zy, "zy"),
-            (self.canvas_zx, "zx"),
+        for view, view_name in [
+            (self.view_yx, "yx"),
+            (self.view_zy, "zy"),
+            (self.view_zx, "zx"),
         ]:
-            wheel_handler = make_camera_handler(view_name)
-            release_handler = make_camera_handler(view_name)
-            resize_handler = make_camera_handler(view_name)
-            canvas.events.mouse_wheel.connect(wheel_handler)
-            canvas.events.mouse_release.connect(release_handler)
-            canvas.events.resize.connect(resize_handler)
-            self._event_handlers.append(
-                (canvas.events.mouse_wheel, wheel_handler)
-            )
-            self._event_handlers.append(
-                (canvas.events.mouse_release, release_handler)
-            )
-            self._event_handlers.append((canvas.events.resize, resize_handler))
+            handler = lambda _e, name=view_name: self._on_camera_change(name)
+            view.camera.transform.changed.connect(handler)
+            self._event_handlers.append((view.camera.transform.changed, handler))
 
     def _setup_controls(self):
         # Mode (Composite/Single)

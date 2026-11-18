@@ -241,6 +241,8 @@ class ImageWindow(QMainWindow):
     roi_selection_changed = Signal(object)  # Emits the selected ROI (or None)
     roi_modified = Signal(object)  # Emits ROI when it's being modified (dragged)
     view_changed = Signal(object)  # Emits self when displayed slice/channel changes
+    # Emits self after the camera's pan/zoom (or the viewport size) changed.
+    camera_changed = Signal(object)
     # Emits the new channel index precisely on change. t/z have this via
     # ViewState.subscribe(); channel has no such observable, so anything
     # that needs to react to *just* a channel change (as opposed to
@@ -631,9 +633,6 @@ class ImageWindow(QMainWindow):
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_A:
             self.renderer.reset_camera(self.img_data.shape)
-            if self.overlay is not None:
-                self.overlay.update()
-            self.canvas.update()
         elif event.key() == Qt.Key_L:
             # Toggle ROI labels visibility
             from ..rois import ROI
@@ -786,9 +785,13 @@ class ImageWindow(QMainWindow):
         self.canvas.events.mouse_press.connect(self.on_mouse_press)
         self.canvas.events.mouse_release.connect(self.on_mouse_release)
         self.canvas.events.key_press.connect(self._on_vispy_key_press)
-        self.canvas.events.mouse_release.connect(self._on_view_transform_event)
-        self.canvas.events.mouse_wheel.connect(self._on_view_transform_event)
-        self.canvas.events.resize.connect(self._on_view_transform_event)
+        # React to the camera itself, not to the mouse/resize events that
+        # drive it: vispy runs later-connected canvas callbacks *before*
+        # SceneCanvas's own handler moves the camera, so those would always
+        # see the previous view. transform.changed fires once per completed
+        # update (pan, zoom, viewport resize, programmatic rect).
+        self._last_px_per_world = None
+        self.view.camera.transform.changed.connect(self._on_view_transform_event)
 
     def _build_hover_label(self):
         self._hover_label = scene.visuals.Text(
@@ -3760,13 +3763,18 @@ class ImageWindow(QMainWindow):
         self.overlay.set_axis_spacing_um(sx)
 
     def _on_view_transform_event(self, _event):
-        for entry in self._point_layers.values():
-            visual = entry.get("visual")
-            if visual is not None:
-                visual.refresh()
-        if self.overlay is not None:
+        # Point markers only depend on zoom, and their refresh is a Python
+        # loop over rows -- skip it for pure pans, which fire every drag frame.
+        px_per_world = tuple(self.view.camera.transform.scale[:2])
+        if px_per_world != self._last_px_per_world:
+            self._last_px_per_world = px_per_world
+            for entry in self._point_layers.values():
+                visual = entry.get("visual")
+                if visual is not None:
+                    visual.refresh()
+        if getattr(self, "overlay", None) is not None:
             self.overlay.update()
-            self.canvas.update()
+        self.camera_changed.emit(self)
 
     def show_overlay_settings_dialog(self):
         if self.overlay is None:
