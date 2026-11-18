@@ -202,7 +202,7 @@ def test_point_csv_treats_extra_t_column_as_feature(tmp_path):
 
 
 def test_point_parquet_roundtrip_preserves_properties(tmp_path):
-    pytest.importorskip("pyarrow")
+    pytest.importorskip("polars")
 
     points = PointTable.from_arrays(
         point_id=[1, 2],

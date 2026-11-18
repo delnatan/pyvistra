@@ -27,6 +27,7 @@ from qtpy.QtWidgets import (
 )
 
 from ..data.points import load_points_csv, load_points_json, load_points_parquet
+from ..data.tracks import load_tracks_csv, load_tracks_parquet
 from ..data.shapes import (
     AddShape,
     RemoveShape,
@@ -35,13 +36,19 @@ from ..data.shapes import (
 from ..data.point_commands import RemovePoint
 from .manager import manager
 
-# Point file loaders keyed by extension, shared by the "Load Points from
-# File..." action -- one dispatch table instead of an if/elif chain, so
-# adding a format later is a one-line addition here.
-_POINT_LOADERS = {
-    ".csv": load_points_csv,
-    ".json": load_points_json,
-    ".parquet": load_points_parquet,
+# What "Load Points/Tracks from File..." reads, by layer type: its file
+# loaders by extension and the window method that adds the layer. Both
+# kinds share one flow (`_on_load_layer_file`), so a format or a layer
+# type is a one-line addition here.
+_FILE_LOADERS = {
+    "points": (
+        {".csv": load_points_csv, ".json": load_points_json, ".parquet": load_points_parquet},
+        "add_point_layer",
+    ),
+    "tracks": (
+        {".csv": load_tracks_csv, ".parquet": load_tracks_parquet},
+        "add_track_layer",
+    ),
 }
 
 
@@ -114,7 +121,8 @@ class LayerManager(QWidget):
         add_menu.addAction("New Shape Layer...", self._on_add_shape_layer)
         add_menu.addAction("New Points Layer...", self._on_add_points_layer)
         add_menu.addSeparator()
-        add_menu.addAction("Load Points from File...", self._on_load_points_file)
+        add_menu.addAction("Load Points from File...", lambda: self._on_load_layer_file("points"))
+        add_menu.addAction("Load Tracks from File...", lambda: self._on_load_layer_file("tracks"))
         self._add_btn.setMenu(add_menu)
         btn_row.addWidget(self._add_btn)
 
@@ -607,30 +615,28 @@ class LayerManager(QWidget):
         if name:
             self._current_window.add_point_layer(name)
 
-    def _on_load_points_file(self):
+    def _on_load_layer_file(self, kind):
+        """Load a *kind* ("points" or "tracks") layer from a file the user
+        picks, named after the file."""
         if self._current_window is None:
             return
+        loaders, add_layer = _FILE_LOADERS[kind]
+        title = kind.capitalize()
+        patterns = " ".join(f"*{ext}" for ext in loaders)
 
         default_dir = "."
         if self._current_window.filepath:
             default_dir = os.path.dirname(self._current_window.filepath)
-
         path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Load Points",
-            default_dir,
-            "Point Files (*.csv *.json *.parquet);;CSV (*.csv);;"
-            "JSON (*.json);;Parquet (*.parquet);;All Files (*)",
+            self, f"Load {title}", default_dir, f"{title} Files ({patterns});;All Files (*)"
         )
         if not path:
             return
 
-        loader = _POINT_LOADERS.get(os.path.splitext(path)[1].lower())
+        loader = loaders.get(os.path.splitext(path)[1].lower())
         if loader is None:
             QMessageBox.warning(
-                self,
-                "Unsupported Format",
-                "Points can be loaded from .csv, .json, or .parquet files.",
+                self, "Unsupported Format", f"{title} can be loaded from {', '.join(loaders)} files."
             )
             return
 
@@ -643,19 +649,19 @@ class LayerManager(QWidget):
 
         pixel_index = QMessageBox.question(
             self,
-            "Point Coordinates",
+            f"{title} Coordinates",
             "Are the x/y coordinates in pixel/array-index space (e.g. raw "
-            "localizer or curve-fit output)?\n\n"
+            "localizer, curve-fit or tracker output)?\n\n"
             "Choose No if coordinates are already in scene/display space.",
         ) == QMessageBox.Yes
 
         try:
-            points = loader(path, pixel_index_coordinates=pixel_index)
+            table = loader(path, pixel_index_coordinates=pixel_index)
         except (ImportError, ValueError) as e:
             QMessageBox.critical(self, "Load Failed", str(e))
             return
 
-        self._current_window.add_point_layer(name, points=points)
+        getattr(self._current_window, add_layer)(name, table)
 
     def _on_remove_layer(self):
         item = self._tree.currentItem()
