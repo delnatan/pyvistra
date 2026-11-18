@@ -6,7 +6,7 @@ Each labeled object is represented by the set of pixel coordinates it occupies.
 """
 
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 import numpy as np
 
@@ -22,6 +22,15 @@ class SparseLabels:
         >>> labels = SparseLabels(shape=(512, 512))
         >>> labels.add(1, (np.array([10, 11]), np.array([20, 21])))
         >>> image[labels.coords(1)]  # direct numpy indexing
+
+    Observable, in the data layer's subscribe/notify idiom (``ShapeData``,
+    ``ViewState``): ``subscribe(callback)`` gets ``callback(kind, label)``
+    after every change -- "added", "removed", "updated", "painted"
+    (``add_pixels``), "erased" (``remove_pixels``), "relabeled" (with the
+    new label), "merged" (with the merged label) and "cleared" (label -1).
+    A brush stroke paints in many small steps, so a subscriber with real
+    work to do should debounce. Subscribers belong to this object: a
+    ``copy()`` or a loaded file starts with none.
     """
 
     def __init__(self, shape: tuple[int, ...]):
@@ -37,6 +46,30 @@ class SparseLabels:
         self._shape = tuple(shape)
         self._objects: dict[int, np.ndarray] = {}  # label -> (ndim, n_pixels)
         self._metadata: dict[int, dict] = {}  # label -> arbitrary metadata
+        self._subscribers: list[Callable[[str, int], None]] = []
+
+    # ---- Change notification ----
+
+    def subscribe(self, callback: Callable[[str, int], None]) -> Callable[[], None]:
+        """Register ``callback(kind, label)`` for changes (see the class
+        docstring). Returns an unsubscribe function."""
+        self._subscribers.append(callback)
+
+        def _unsubscribe() -> None:
+            try:
+                self._subscribers.remove(callback)
+            except ValueError:
+                pass
+
+        return _unsubscribe
+
+    def _emit(self, kind: str, label: int = -1) -> None:
+        for callback in list(self._subscribers):
+            try:
+                callback(kind, int(label))
+            except Exception:
+                # Don't let one bad subscriber break the rest.
+                pass
 
     @property
     def shape(self) -> tuple[int, ...]:
@@ -165,6 +198,7 @@ class SparseLabels:
             raise ValueError(f"Label {label} already exists")
 
         self._set_coords(label, coords)
+        self._emit("added", label)
 
     def remove(self, label: int) -> None:
         """
@@ -180,6 +214,7 @@ class SparseLabels:
             raise KeyError(f"Label {label} not found")
         del self._objects[label]
         self._metadata.pop(label, None)
+        self._emit("removed", label)
 
     def update(self, label: int, coords: tuple[np.ndarray, ...]) -> None:
         """
@@ -195,6 +230,7 @@ class SparseLabels:
         if label not in self._objects:
             raise KeyError(f"Label {label} not found")
         self._set_coords(label, coords)
+        self._emit("updated", label)
 
     def add_pixels(self, label: int, coords: tuple[np.ndarray, ...]) -> None:
         """
@@ -213,6 +249,7 @@ class SparseLabels:
 
         if label not in self._objects:
             self._objects[label] = coords
+            self._emit("painted", label)
             return
 
         existing = self._objects[label]
@@ -226,6 +263,7 @@ class SparseLabels:
             transposed = combined.T
             unique = np.unique(transposed, axis=0)
             self._objects[label] = unique.T.astype(np.int32)
+        self._emit("painted", label)
 
     def remove_pixels(self, label: int, coords: tuple[np.ndarray, ...]) -> None:
         """
@@ -263,6 +301,7 @@ class SparseLabels:
             self._metadata.pop(label, None)
         else:
             self._objects[label] = existing[:, keep_mask]
+        self._emit("erased", label)
 
     def relabel(self, old: int, new: int) -> None:
         """
@@ -286,6 +325,7 @@ class SparseLabels:
         self._objects[new] = self._objects.pop(old)
         if old in self._metadata:
             self._metadata[new] = self._metadata.pop(old)
+        self._emit("relabeled", new)
 
     def merge(self, labels: list[int], new_label: int = None) -> int:
         """
@@ -338,6 +378,7 @@ class SparseLabels:
 
         # Set merged coordinates
         self._objects[new_label] = combined
+        self._emit("merged", new_label)
 
         return new_label
 
@@ -345,6 +386,7 @@ class SparseLabels:
         """Remove all objects."""
         self._objects.clear()
         self._metadata.clear()
+        self._emit("cleared")
 
     # ---- Conversion ----
 

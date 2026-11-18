@@ -694,7 +694,7 @@ class LayerManager(QWidget):
         new_name, ok = QInputDialog.getText(self, "Rename Layer", "New name:", text=old_name)
         if ok and new_name and new_name != old_name:
             try:
-                self._current_window.layers.rename(old_name, new_name)
+                self._current_window.rename_layer(old_name, new_name)
                 self._refresh()
             except (KeyError, ValueError) as e:
                 from qtpy.QtWidgets import QMessageBox
