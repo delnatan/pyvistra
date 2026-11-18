@@ -1,8 +1,11 @@
 import re
 from datetime import datetime
+from functools import cached_property
 
 import h5py
 import numpy as np
+
+from .imaris_surfaces import ImageGrid, read_surfaces
 
 
 class ImarisReader:
@@ -14,6 +17,8 @@ class ImarisReader:
         dtype (np.dtype): Data type of the image.
         shape (tuple): Dimensions (Time, Channels, Z, Y, X).
         voxel_size (tuple): (Z, Y, X) voxel size in microns.
+        origin (tuple): (Z, Y, X) physical position (microns) of the corner of
+            voxel 0 -- Imaris' ExtMin. Surface coordinates are relative to it.
         timestamps (list): List of datetime objects for each time point.
         channels_info (list): List of dicts containing metadata (Name, Wavelengths, Exposure).
         resolution_levels (int): Number of resolution levels available.
@@ -21,6 +26,10 @@ class ImarisReader:
 
     Methods:
         read(c=0, t=0, z=None, res_level=0)
+        image_grid(res_level=0)
+
+    Surfaces objects in the scene are available as ``surfaces``, a dict of
+    :class:`~pyvistra.readers.imaris_surfaces.ImarisSurfaces` by name.
     """
 
     def __init__(self, filepath):
@@ -29,6 +38,8 @@ class ImarisReader:
 
         # Initialize containers
         self.voxel_size = (1.0, 1.0, 1.0)
+        self.origin = (0.0, 0.0, 0.0)
+        self._extent = None  # (Z, Y, X) microns covered by the image
         self.timestamps = []
         self.channels_info = []
 
@@ -235,6 +246,8 @@ class ImarisReader:
         vox_y = (max_y - min_y) / self.size_y if self.size_y > 0 else 1.0
         vox_z = (max_z - min_z) / self.size_z if self.size_z > 0 else 1.0
         self.voxel_size = (vox_z, vox_y, vox_x)
+        self.origin = (min_z, min_y, min_x)
+        self._extent = (max_z - min_z, max_y - min_y, max_x - min_x)
 
         # --- Timestamps ---
         time_info = info_group.get("TimeInfo")
@@ -337,11 +350,41 @@ class ImarisReader:
         else:
             return dataset[:size_z, :size_y, :size_x]
 
+    def image_grid(self, res_level=0) -> ImageGrid:
+        """Voxel grid (origin, voxel size, shape) of a resolution level."""
+        if res_level == 0:
+            shape = (self.size_z, self.size_y, self.size_x)
+        else:
+            t0 = self._group_for_index(
+                self._file["DataSet"][self._res_groups[res_level]],
+                "TimePoint",
+                0,
+            )
+            c0 = self._group_for_index(t0, "Channel", 0)
+            shape = self._read_image_size_attrs(c0, c0["Data"])
+        extent = self._extent
+        if extent is None:
+            extent = np.multiply(
+                self.voxel_size, (self.size_z, self.size_y, self.size_x)
+            )
+        return ImageGrid(
+            origin=np.array(self.origin, float),
+            voxel_size=np.array(extent, float) / np.array(shape),
+            shape=tuple(int(n) for n in shape),
+        )
+
+    @cached_property
+    def surfaces(self):
+        """Surfaces items of the Imaris scene, ``{name: ImarisSurfaces}`` (may be empty)."""
+        return read_surfaces(self._file, self.image_grid)
+
     def __repr__(self):
         return (
             f"<ImarisReader: {self.filepath}\n"
             f"  Shape (T,C,Z,Y,X): {self.shape}\n"
             f"  Dtype: {self.dtype}\n"
             f"  Voxel Size (um): {self.voxel_size}\n"
-            f"  Channels: {[c['name'] for c in self.channels_info]}>"
+            f"  Channels: {[c['name'] for c in self.channels_info]}"
+            + (f"\n  Surfaces: {list(self.surfaces)}" if self.surfaces else "")
+            + ">"
         )

@@ -11,6 +11,7 @@ nav:
   - Getting Started: getting-started.md
   - Interactive Python: interactive-python.md
   - Image IO and Conversion: io-and-conversion.md
+  - Imaris Surfaces Format: imaris-surfaces.md
   - Annotations and Labels: annotations-and-labels.md
   - GUI Scope: gui-scope.md
 
