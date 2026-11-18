@@ -14,7 +14,7 @@ def main():
 
     # Now it's safe to import modules that create QObjects at module level
     from pyvistra.ui import Toolbar
-    from pyvistra.theme import DARK_THEME
+    from pyvistra import theme
     from pyvistra.data.buffer import sweep_stale_buffers
 
     # Reclaim scratch buffers left by crashed sessions right away, not just
@@ -22,7 +22,7 @@ def main():
     sweep_stale_buffers()
 
     # Apply global stylesheet
-    qt_app.setStyleSheet(DARK_THEME)
+    theme.apply(qt_app)
 
     # Create the floating toolbar
     toolbar = Toolbar()

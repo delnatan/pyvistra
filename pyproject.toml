@@ -42,3 +42,7 @@ pyvistra = "pyvistra.__main__:main"
 where = ["."]
 include = ["pyvistra*"]
 
+[tool.setuptools.package-data]
+# Bundled colormaps, toolbar icons and the theme's arrow glyphs.
+pyvistra = ["_resources/**/*", "py.typed"]
+

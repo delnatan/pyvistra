@@ -2328,9 +2328,9 @@ def open_tiled_viewer(image_paths, tiles_per_page=25):
         app = QApplication(sys.argv)
 
     # Apply theme
-    from ..theme import DARK_THEME
+    from .. import theme
 
-    app.setStyleSheet(DARK_THEME)
+    theme.apply(app)
 
     viewer = TiledViewer(image_paths, tiles_per_page=tiles_per_page)
     from ..ui.workspace import present_window

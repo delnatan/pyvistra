@@ -21,3 +21,11 @@ Naming:
 - `console.svg` or `console.png`
 
 If a custom file is missing, pyvistra falls back to a built-in Qt icon.
+
+Theme glyphs (not toolbar icons)
+--------------------------------
+
+`chevron-up.svg`, `chevron-down.svg` and their `-disabled` variants are the
+spin-box and combo-box arrows `pyvistra/theme.py` draws. Their stroke colors
+are `colors.TEXT_SECONDARY` and `colors.TEXT_DISABLED`; change them with
+those tokens.

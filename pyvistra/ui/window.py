@@ -4399,9 +4399,9 @@ def imshow(
         app = QApplication(sys.argv)
 
     # Apply Theme
-    from ..theme import DARK_THEME
+    from .. import theme
 
-    app.setStyleSheet(DARK_THEME)
+    theme.apply(app)
 
     # Handle backward compatibility: title= keyword argument
     if meta_or_title is None and title is not None:
@@ -4470,7 +4470,7 @@ def run_app():
     """
     app = QApplication.instance()
     if app:
-        from ..theme import DARK_THEME
+        from .. import theme
 
-        app.setStyleSheet(DARK_THEME)
+        theme.apply(app)
         app.exec_()
