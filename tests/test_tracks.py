@@ -152,3 +152,90 @@ def test_track_csv_roundtrip_preserves_properties(tmp_path):
 
     assert np.allclose(loaded.properties["speed"], [1.0, 2.0, 3.0])
     assert loaded.properties["label"].tolist() == ["a", "b", "c"]
+
+
+def test_aggregate_property_is_per_track_nanmean():
+    tracks = TrackTable.from_arrays(
+        track_id=[1, 1, 1, 2, 2, 3],
+        t=[0, 1, 2, 0, 1, 0],
+        x=[0] * 6,
+        y=[0] * 6,
+        properties={"v": [1.0, np.nan, 3.0, np.nan, np.nan, 7.0]},
+    )
+    out = tracks.aggregate_property(tracks.properties["v"])
+    assert out[0] == 2.0
+    assert np.isnan(out[1])  # all-NaN track: NaN, not 0 and no warning
+    assert out[2] == 7.0
+
+
+class _Recorder:
+    """Stands in for a vispy visual: keeps the last set_data call."""
+
+    order = 0
+    visible = True
+
+    def __init__(self, **_kw):
+        self.last = None
+
+    def set_data(self, **kw):
+        self.last = kw
+
+    def set_gl_state(self, *a, **k):
+        pass
+
+
+def _visual(monkeypatch, tracks, **style):
+    from pyvistra.visuals import tracks as mod
+
+    class _Scene:
+        class visuals:
+            Line = _Recorder
+            Markers = _Recorder
+
+    monkeypatch.setattr(mod, "scene", _Scene)
+
+    class _View:
+        scene = None
+
+    visual = mod.TrackLayerVisual(_View(), **style)
+    visual.set_tracks(tracks)
+    return visual
+
+
+def _two_tracks():
+    # Track 1 lives frames 0-3, track 2 frames 5-7.
+    return TrackTable.from_arrays(
+        track_id=[1, 1, 1, 1, 2, 2, 2],
+        t=[0, 1, 2, 3, 5, 6, 7],
+        x=[0, 1, 2, 3, 10, 11, 12],
+        y=[0, 0, 0, 0, 5, 5, 5],
+        pixel_index_coordinates=False,
+    )
+
+
+def test_refresh_draws_each_tracks_trail_up_to_now(monkeypatch):
+    visual = _visual(monkeypatch, _two_tracks(), trail_window=None)
+    visual.set_time_z(2)
+    pos = visual._line.last["pos"]
+    # Track 1's first three vertices -> two segments; track 2 not born yet.
+    assert pos.shape == (4, 2)
+    assert pos[:, 0].tolist() == [0, 1, 1, 2]
+    # Older segments fade: alpha rises with age within the visible trail.
+    alpha = visual._line.last["color"][:, 3]
+    assert alpha[0] < alpha[2]
+    # Head only where the track has a vertex at the current frame.
+    assert visual._heads.last["pos"].tolist() == [[2.0, 0.0]]
+
+
+def test_refresh_trail_window_limits_history(monkeypatch):
+    visual = _visual(monkeypatch, _two_tracks(), trail_window=1)
+    visual.set_time_z(7)
+    pos = visual._line.last["pos"]
+    assert pos[:, 0].tolist() == [11, 12]  # frames 6-7 of track 2 only
+
+
+def test_show_all_times_draws_every_track_whole(monkeypatch):
+    visual = _visual(monkeypatch, _two_tracks(), show_all_times=True)
+    visual.set_time_z(0)
+    assert visual._line.last["pos"].shape == (2 * (3 + 2), 2)
+    assert visual.style["show_all_times"] is True

@@ -82,6 +82,14 @@ class TrackDisplaySettingsDialog(QDialog):
         self.show_heads.setChecked(bool(cfg.get("show_heads", True)))
         form.addRow("Show Track Heads", self.show_heads)
 
+        self.show_all_times = QCheckBox()
+        self.show_all_times.setChecked(bool(cfg.get("show_all_times", False)))
+        self.show_all_times.setToolTip(
+            "Draw every track whole on every frame (a map of where each\n"
+            "trajectory went) instead of its trail up to the current frame."
+        )
+        form.addRow("Show Whole Tracks", self.show_all_times)
+
         self.head_size = QDoubleSpinBox()
         self.head_size.setRange(1.0, 200.0)
         self.head_size.setValue(float(cfg.get("head_size", 8.0)))
@@ -148,6 +156,7 @@ class TrackDisplaySettingsDialog(QDialog):
             "line_width": self.line_width.value(),
             "opacity": self.opacity.value(),
             "show_heads": self.show_heads.isChecked(),
+            "show_all_times": self.show_all_times.isChecked(),
             "head_size": self.head_size.value(),
             "min_track_length": self.min_track_length.value(),
             "color_mode": self.color_mode.currentData(),

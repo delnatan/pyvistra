@@ -236,14 +236,18 @@ class TrackTable:
         A track has one value per frame, but selection/coloring/inspection
         all need a single scalar per trajectory — this is the one place
         that reduction happens, so callers agree on what a track's "value"
-        of a property is.
+        of a property is. A track whose values are all NaN gets NaN.
         """
-        arr = np.asarray(values)
-        out = np.empty(self.n_tracks, dtype=np.float64)
-        for i, (_tid, sl) in enumerate(self.iter_track_slices()):
-            vals = np.asarray(arr[sl], dtype=np.float64)
-            out[i] = float(np.nanmean(vals)) if vals.size else 0.0
-        return out
+        n = self.n_tracks
+        if n == 0:
+            return np.empty(0, dtype=np.float64)
+        arr = np.asarray(values, dtype=np.float64)
+        finite = ~np.isnan(arr)
+        starts = self._track_starts
+        sums = np.add.reduceat(np.where(finite, arr, 0.0), starts)
+        counts = np.add.reduceat(finite.astype(np.int64), starts)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return np.where(counts > 0, sums / np.maximum(counts, 1), np.nan)
 
 
 def load_tracks_csv(path, *, pixel_index_coordinates: bool = True) -> TrackTable:
