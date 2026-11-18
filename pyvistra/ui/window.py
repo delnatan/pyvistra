@@ -247,6 +247,9 @@ class ImageWindow(QMainWindow):
     # view_changed's coarser "slice or channel changed") uses this instead.
     channel_changed = Signal(int)
     label_changed = Signal(object)  # Emits SparseLabels when labels change
+    # What the brush paints changed: the active mask layer, active_label,
+    # brush_size or preserve_labels. Read the new state off the window.
+    paint_state_changed = Signal()
     mask_layer_added = Signal(str)  # Emits mask layer name when added
     mask_layer_removed = Signal(str)  # Emits mask layer name when removed
     track_layer_added = Signal(str)  # Emits track layer name when added
@@ -1473,6 +1476,7 @@ class ImageWindow(QMainWindow):
             else:
                 shape = (self.Y, self.X)
             labels = SparseLabels(shape)
+        previous_active = self._active_mask_layer
         visual = LabelOverlayVisual(
             self.view,
             shape_yx=(self.Y, self.X),
@@ -1487,6 +1491,8 @@ class ImageWindow(QMainWindow):
             added_signal=self.mask_layer_added,
             layer_type="labels", layer_data=labels, visual=visual,
         )
+        if self._active_mask_layer != previous_active:
+            self.paint_state_changed.emit()
 
     def set_mask_layer_labels(self, name, labels):
         """Replace the SparseLabels of mask layer *name* -- the
@@ -1513,10 +1519,13 @@ class ImageWindow(QMainWindow):
         """Remove a named mask layer and clean up its visual."""
         if name not in self._mask_layers:
             return
+        previous_active = self._active_mask_layer
         self._unregister_layer_entry(
             self._mask_layers, "_active_mask_layer", name,
             removed_signal=self.mask_layer_removed,
         )
+        if self._active_mask_layer != previous_active:
+            self.paint_state_changed.emit()
 
     def set_mask_layer_visible(self, name, visible):
         """Toggle visibility of a specific mask layer."""
@@ -1524,7 +1533,10 @@ class ImageWindow(QMainWindow):
 
     def set_active_mask_layer(self, name):
         """Switch which mask layer receives painting."""
+        previous = self._active_mask_layer
         self._set_active_layer(self._mask_layers, "_active_mask_layer", name)
+        if self._active_mask_layer != previous:
+            self.paint_state_changed.emit()
 
     # ---- Multiple Track Layers API ----
 
@@ -3016,7 +3028,7 @@ class ImageWindow(QMainWindow):
 
     @active_label.setter
     def active_label(self, value: int):
-        self._active_label = value
+        self._set_paint_state("_active_label", int(value))
 
     @property
     def brush_size(self) -> int:
@@ -3024,7 +3036,7 @@ class ImageWindow(QMainWindow):
 
     @brush_size.setter
     def brush_size(self, value: int):
-        self._brush_size = value
+        self._set_paint_state("_brush_size", int(value))
 
     @property
     def preserve_labels(self) -> bool:
@@ -3032,7 +3044,12 @@ class ImageWindow(QMainWindow):
 
     @preserve_labels.setter
     def preserve_labels(self, value: bool):
-        self._preserve_labels = value
+        self._set_paint_state("_preserve_labels", bool(value))
+
+    def _set_paint_state(self, attr, value):
+        if getattr(self, attr) != value:
+            setattr(self, attr, value)
+            self.paint_state_changed.emit()
 
     def show_metadata_dialog(self):
         dlg = MetadataDialog(self.meta, parent=self)

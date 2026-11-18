@@ -40,11 +40,14 @@ class LabelManager(QWidget):
 
     Signals:
         label_added: Emitted when a new label is created (label_id, window)
-        active_label_changed: Emitted when active label changes (label_id)
+
+    The brush controls mirror the active window's paint state (its
+    ``paint_state_changed`` signal) and write back through its setters,
+    so they agree however that state is changed -- here, by a keyboard
+    shortcut in the window, or by a plugin.
     """
 
     label_added = Signal(int, object)
-    active_label_changed = Signal(int)
 
     def __init__(self):
         super().__init__()
@@ -53,6 +56,7 @@ class LabelManager(QWidget):
         self.active_window = None
         self._connected_windows = set()
         self._is_shutting_down = False
+        self._listed_labels = None  # the SparseLabels the list shows
 
         self._setup_ui()
 
@@ -190,22 +194,16 @@ class LabelManager(QWidget):
     # ---- Signal Handlers for UI ----
 
     def _on_active_label_changed(self, value):
-        """Handle active label spinbox change."""
-        if self.active_window and hasattr(self.active_window, "_active_label"):
-            self.active_window._active_label = value
-        self.active_label_changed.emit(value)
+        if self.active_window is not None:
+            self.active_window.active_label = value
 
     def _on_brush_size_changed(self, value):
-        """Handle brush size spinbox change."""
-        if self.active_window and hasattr(self.active_window, "_brush_size"):
-            self.active_window._brush_size = value
+        if self.active_window is not None:
+            self.active_window.brush_size = value
 
     def _on_preserve_changed(self, checked):
-        """Handle preserve labels checkbox change."""
-        if self.active_window and hasattr(
-            self.active_window, "_preserve_labels"
-        ):
-            self.active_window._preserve_labels = checked
+        if self.active_window is not None:
+            self.active_window.preserve_labels = checked
 
     def _on_show_changed(self, checked):
         """Handle show labels checkbox change."""
@@ -281,6 +279,7 @@ class LabelManager(QWidget):
         window.window_closing.connect(self._on_window_closing)
         window.window_activated.connect(self._on_window_activated)
         window.label_changed.connect(self._on_label_changed)
+        window.paint_state_changed.connect(self._sync_from_window)
 
         self._connected_windows.add(window)
 
@@ -294,6 +293,7 @@ class LabelManager(QWidget):
             window.window_closing.disconnect(self._on_window_closing)
             window.window_activated.disconnect(self._on_window_activated)
             window.label_changed.disconnect(self._on_label_changed)
+            window.paint_state_changed.disconnect(self._sync_from_window)
         except (TypeError, RuntimeError):
             pass
 
@@ -359,32 +359,51 @@ class LabelManager(QWidget):
         self.refresh_windows()
         self.refresh_list()
 
-        # Sync UI with window state
-        if hasattr(window, "_active_label"):
-            self.active_label_spin.blockSignals(True)
-            self.active_label_spin.setValue(window._active_label)
-            self.active_label_spin.blockSignals(False)
+        self._sync_from_window()
 
-        if hasattr(window, "_brush_size"):
-            self.brush_size_spin.blockSignals(True)
-            self.brush_size_spin.setValue(window._brush_size)
-            self.brush_size_spin.blockSignals(False)
+    def _sync_from_window(self):
+        """Show the active window's paint state: its active label, brush
+        size and preserve flag, and the active mask layer's labels and
+        overlay. Any connected window may call this (a background one's
+        change is a no-op here)."""
+        window = self.active_window
+        if window is None or self._is_shutting_down:
+            return
+        if getattr(window, "labels", None) is not self._listed_labels:
+            self.refresh_list()
+        for widget, value in (
+            (self.active_label_spin, window.active_label),
+            (self.brush_size_spin, window.brush_size),
+            (self.opacity_spin, int(window.label_overlay.get_opacity() * 100) if window.label_overlay else None),
+        ):
+            if value is not None:
+                blocked = widget.blockSignals(True)
+                widget.setValue(value)
+                widget.blockSignals(blocked)
+        for checkbox, checked in (
+            (self.preserve_checkbox, window.preserve_labels),
+            (self.show_checkbox, window.label_overlay.visible if window.label_overlay else None),
+        ):
+            if checked is not None:
+                blocked = checkbox.blockSignals(True)
+                checkbox.setChecked(checked)
+                checkbox.blockSignals(blocked)
+        self._select_active_label()
 
-        if hasattr(window, "_preserve_labels"):
-            self.preserve_checkbox.blockSignals(True)
-            self.preserve_checkbox.setChecked(window._preserve_labels)
-            self.preserve_checkbox.blockSignals(False)
-
-        if hasattr(window, "label_overlay") and window.label_overlay:
-            self.opacity_spin.blockSignals(True)
-            self.opacity_spin.setValue(
-                int(window.label_overlay.get_opacity() * 100)
-            )
-            self.opacity_spin.blockSignals(False)
-
-            self.show_checkbox.blockSignals(True)
-            self.show_checkbox.setChecked(window.label_overlay.visible)
-            self.show_checkbox.blockSignals(False)
+    def _select_active_label(self):
+        """Highlight the active label's row, if it has pixels yet. A
+        selection that already includes it (several rows picked for a
+        merge) is left alone."""
+        label = self.active_window.active_label if self.active_window else None
+        rows = [self.label_list.item(r) for r in range(self.label_list.count())]
+        item = next((it for it in rows if it.data(Qt.UserRole) == label), None)
+        if item is None or item.isSelected():
+            return
+        blocked = self.label_list.blockSignals(True)
+        self.label_list.clearSelection()
+        item.setSelected(True)
+        self.label_list.scrollToItem(item)
+        self.label_list.blockSignals(blocked)
 
     def remove_window(self, window):
         """Handle window closure."""
@@ -401,11 +420,8 @@ class LabelManager(QWidget):
     def refresh_list(self):
         """Refresh the label list from active window."""
         self.label_list.clear()
-
-        if not self.active_window:
-            return
-
         labels = getattr(self.active_window, "labels", None)
+        self._listed_labels = labels
         if labels is None:
             return
 
@@ -428,6 +444,7 @@ class LabelManager(QWidget):
                 item.setCheckState(Qt.Checked if visible else Qt.Unchecked)
 
             self.label_list.addItem(item)
+        self._select_active_label()
 
     def on_item_clicked(self, item):
         """Handle label list item click."""
