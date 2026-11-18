@@ -101,7 +101,9 @@ class LayerList:
         return layer
 
     def rename(self, old_name: str, new_name: str) -> None:
-        """Rename a layer."""
+        """Rename a layer. For a window's layers, call
+        ``ImageWindow.rename_layer`` instead: it also renames the window's
+        per-type registries, which this list knows nothing about."""
         if old_name not in self._layers:
             raise KeyError(f"No layer named '{old_name}'")
         if new_name in self._layers:

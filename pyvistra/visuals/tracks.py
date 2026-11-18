@@ -27,6 +27,7 @@ DEFAULT_STYLE = {
     "show_heads": True,
     "head_size": 8.0,
     "min_track_length": 1,
+    "show_all_times": False,
 }
 
 _TRACK_LENGTH_PROPERTY = "__track_length__"
@@ -50,6 +51,7 @@ class TrackLayerVisual:
         show_heads=True,
         head_size=8.0,
         min_track_length=1,
+        show_all_times=False,
     ):
         self.view = view
         self._tracks: TrackTable | None = None
@@ -65,6 +67,9 @@ class TrackLayerVisual:
         self._show_heads = bool(show_heads)
         self._head_size = float(head_size)
         self._min_track_length = int(min_track_length)
+        # Draw every track whole regardless of the current frame (a map
+        # of where each trajectory went), instead of its trail up to now.
+        self._show_all_times = bool(show_all_times)
         self._selection_spec = PropertyFilterSpec()
         self._selection_effect = SelectionEffect()
         self._selection_colors: dict[int, tuple[float, float, float, float] | None] = {}
@@ -129,6 +134,7 @@ class TrackLayerVisual:
             "show_heads": self._show_heads,
             "head_size": self._head_size,
             "min_track_length": self._min_track_length,
+            "show_all_times": self._show_all_times,
         }
 
     def set_tracks(self, tracks: TrackTable | None):
@@ -184,6 +190,8 @@ class TrackLayerVisual:
             self._head_size = float(kwargs["head_size"])
         if "min_track_length" in kwargs:
             self._min_track_length = int(kwargs["min_track_length"])
+        if "show_all_times" in kwargs:
+            self._show_all_times = bool(kwargs["show_all_times"])
         self.refresh()
 
     def remove(self):
@@ -191,93 +199,97 @@ class TrackLayerVisual:
         self._heads.parent = None
 
     def refresh(self):
-        if not self._visible or self._tracks is None or self._tracks.n_rows == 0:
+        """Redraw the trails at the current (t, z).
+
+        Vectorized over every vertex at once -- this runs on every frame
+        change, and a per-segment Python loop made scrubbing a movie with
+        tens of thousands of tracks stall. Rows are sorted by (track, t)
+        (a TrackTable invariant), so a track's visible vertices are one
+        contiguous run of the visible-row index, and consecutive visible
+        rows of the same track are exactly the segments to draw.
+        """
+        tracks = self._tracks
+        if not self._visible or tracks is None or tracks.n_rows == 0:
             self._clear_line()
             self._heads.set_data(pos=np.zeros((0, 2), dtype=np.float32), size=0)
             return
 
-        segment_positions = []
-        segment_colors = []
-        head_positions = []
-        head_colors = []
-
         track_visible = self._build_track_visibility()
         track_colors = self._build_track_colors()
+        track_ids = tracks.track_ids
+        visible_by_track = np.array([track_visible[int(tid)] for tid in track_ids], dtype=bool)
+        rgb_by_track = np.array(
+            [track_colors.get(int(tid), (1.0, 1.0, 1.0))[:3] for tid in track_ids], dtype=np.float32
+        ).reshape(-1, 3)
+
+        # Track index (into track_ids) of every row.
+        row_track = np.repeat(np.arange(len(track_ids)), tracks._track_counts)
 
         # pixel_index_coordinates (declared on the TrackTable itself, by
         # whoever loaded/constructed it — see TrackTable's docstring): when
         # set, x/y are array-index coordinates and need +0.5 to land on
         # vispy Image's pixel-center convention (matches the ortho-view
-        # crosshair in viewers/ortho.py). Refinement (e.g. a sub-pixel
-        # Gaussian fit) doesn't change this — it's still the same frame as
-        # the integer seed it was refined from, just more precise.
-        offset = 0.5 if self._tracks.pixel_index_coordinates else 0.0
+        # crosshair in viewers/ortho.py).
+        offset = 0.5 if tracks.pixel_index_coordinates else 0.0
 
-        for track_id, track_slice in self._tracks.iter_track_slices():
-            if not track_visible[int(track_id)]:
-                continue
-
-            t = self._tracks.t[track_slice]
-            x = self._tracks.x[track_slice] + offset
-            y = self._tracks.y[track_slice] + offset
-            z = self._tracks.z[track_slice] if self._tracks.has_z else None
-
-            in_time = t <= self._t_idx
+        t = tracks.t
+        shown = visible_by_track[row_track]
+        if not self._show_all_times:
+            shown &= t <= self._t_idx
             if self._trail_window is not None:
-                in_time &= t >= (self._t_idx - int(self._trail_window))
+                shown &= t >= (self._t_idx - int(self._trail_window))
+        if tracks.has_z:
+            # 2D canvas display: only show points close to current z slice.
+            shown &= np.abs(tracks.z - self._z_idx) <= 0.5
 
-            idx = np.where(in_time)[0]
-            if idx.size == 0:
-                continue
+        rows = np.flatnonzero(shown)
+        if rows.size == 0:
+            self._clear_line()
+            self._heads.set_data(pos=np.zeros((0, 2), dtype=np.float32), size=0)
+            return
 
-            if z is not None:
-                # 2D canvas display: only show points close to current z slice.
-                z_ok = np.abs(z - self._z_idx) <= 0.5
-                idx = idx[z_ok[idx]]
-                if idx.size == 0:
-                    continue
+        trk = row_track[rows]
+        tt = t[rows]
+        pos = np.column_stack((tracks.x[rows] + offset, tracks.y[rows] + offset)).astype(np.float32)
 
-            tx = x[idx]
-            ty = y[idx]
-            tt = t[idx]
+        # Each track's run within `rows`: its first and last visible row.
+        run_start = np.flatnonzero(np.r_[True, trk[1:] != trk[:-1]])
+        run_end = np.r_[run_start[1:], rows.size] - 1
+        run_of_row = np.repeat(np.arange(run_start.size), run_end - run_start + 1)
 
-            rgb = track_colors.get(int(track_id), (1.0, 1.0, 1.0))
-
-            if idx.size >= 2:
-                if tt[-1] > tt[0]:
-                    age_norm = (tt[1:] - tt[0]) / float(tt[-1] - tt[0])
-                else:
-                    age_norm = np.ones(idx.size - 1, dtype=np.float32)
-
-                for i in range(idx.size - 1):
-                    p0 = np.array([tx[i], ty[i]], dtype=np.float32)
-                    p1 = np.array([tx[i + 1], ty[i + 1]], dtype=np.float32)
-                    alpha = (0.2 + 0.8 * float(age_norm[i])) * self._opacity
-                    color = (rgb[0], rgb[1], rgb[2], alpha)
-                    segment_positions.extend([p0, p1])
-                    segment_colors.extend([color, color])
-
-            # Only draw a head when the track actually has a point at the
-            # current frame — otherwise a track that ended earlier keeps
-            # showing a stale, frozen head for the rest of the trail window.
-            if self._show_heads and tt[-1] == self._t_idx:
-                head_positions.append(np.array([tx[-1], ty[-1]], dtype=np.float32))
-                head_colors.append((rgb[0], rgb[1], rgb[2], self._opacity))
-
-        if segment_positions:
+        a = np.flatnonzero(trk[:-1] == trk[1:])  # segment i joins visible rows a, a+1
+        if a.size:
+            run = run_of_row[a]
+            t_first = tt[run_start[run]].astype(np.float64)
+            span = tt[run_end[run]].astype(np.float64) - t_first
+            age = np.ones(a.size, dtype=np.float64)
+            has_span = span > 0
+            age[has_span] = (tt[a + 1][has_span] - t_first[has_span]) / span[has_span]
+            alpha = ((0.2 + 0.8 * age) * self._opacity).astype(np.float32)
+            colors = np.column_stack((rgb_by_track[trk[a]], alpha))
+            seg_pos = np.empty((2 * a.size, 2), dtype=np.float32)
+            seg_pos[0::2] = pos[a]
+            seg_pos[1::2] = pos[a + 1]
             self._line.set_data(
-                pos=np.asarray(segment_positions, dtype=np.float32),
-                color=np.asarray(segment_colors, dtype=np.float32),
+                pos=seg_pos,
+                color=np.repeat(colors, 2, axis=0).astype(np.float32),
                 connect="segments",
                 width=self._line_width,
             )
         else:
             self._clear_line()
 
-        if head_positions:
+        # Only draw a head when the track actually has a point at the
+        # current frame — otherwise a track that ended earlier keeps
+        # showing a stale, frozen head for the rest of the trail window.
+        heads = run_end[tt[run_end] == self._t_idx] if self._show_heads else run_end[:0]
+        if heads.size:
+            head_colors = np.column_stack(
+                (rgb_by_track[trk[heads]], np.full(heads.size, self._opacity, dtype=np.float32))
+            )
             self._heads.set_data(
-                pos=np.asarray(head_positions, dtype=np.float32),
-                face_color=np.asarray(head_colors, dtype=np.float32),
+                pos=pos[heads],
+                face_color=head_colors.astype(np.float32),
                 edge_color=(1.0, 1.0, 1.0, min(1.0, self._opacity + 0.1)),
                 edge_width=1.0,
                 symbol="disc",

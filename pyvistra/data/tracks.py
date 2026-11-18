@@ -16,7 +16,7 @@ class TrackTable:
     see the matching field on :class:`~pyvistra.data.points.PointTable` for
     the full rationale. Defaults to ``True`` here (rather than ``False`` as
     on ``PointTable``) because every current source of track data is an
-    external array-index pipeline (``load_tracks_csv``, e.g. from magikit);
+    external array-index pipeline (``load_tracks_csv``/``load_tracks_parquet``);
     there is currently no interactive/scene-space way to create a track (see
     ``AddTrack`` in ``data/track_commands.py``, which has no callers yet).
     """
@@ -236,20 +236,29 @@ class TrackTable:
         A track has one value per frame, but selection/coloring/inspection
         all need a single scalar per trajectory — this is the one place
         that reduction happens, so callers agree on what a track's "value"
-        of a property is.
+        of a property is. A track whose values are all NaN gets NaN.
         """
-        arr = np.asarray(values)
-        out = np.empty(self.n_tracks, dtype=np.float64)
-        for i, (_tid, sl) in enumerate(self.iter_track_slices()):
-            vals = np.asarray(arr[sl], dtype=np.float64)
-            out[i] = float(np.nanmean(vals)) if vals.size else 0.0
-        return out
+        n = self.n_tracks
+        if n == 0:
+            return np.empty(0, dtype=np.float64)
+        arr = np.asarray(values, dtype=np.float64)
+        finite = ~np.isnan(arr)
+        starts = self._track_starts
+        sums = np.add.reduceat(np.where(finite, arr, 0.0), starts)
+        counts = np.add.reduceat(finite.astype(np.int64), starts)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return np.where(counts > 0, sums / np.maximum(counts, 1), np.nan)
+
+
+# Track files name their columns as point files do (``frame``, not ``t``):
+# a track file is a point file whose rows also carry a ``track_id``.
+_REQUIRED_COLUMNS = {"track_id", "frame", "x", "y"}
+_SPECIAL_COLUMNS = _REQUIRED_COLUMNS | {"z"}
 
 
 def load_tracks_csv(path, *, pixel_index_coordinates: bool = True) -> TrackTable:
-    """Load a TrackTable from a CSV file with ``track_id, t, x, y[, z]`` columns.
-
-    Any additional columns are loaded as per-row properties.
+    """Load a TrackTable from a CSV file with ``track_id, frame, x, y[, z]``
+    columns. Any additional columns are loaded as per-row properties.
 
     ``pixel_index_coordinates`` defaults to ``True`` since track CSVs
     currently only ever come from array-index tracking pipelines (see
@@ -268,7 +277,7 @@ def load_tracks_csv(path, *, pixel_index_coordinates: bool = True) -> TrackTable
         reader = csv.DictReader(f)
         if reader.fieldnames is None:
             raise ValueError("CSV has no header row")
-        required = {"track_id", "t", "x", "y"} - set(reader.fieldnames)
+        required = _REQUIRED_COLUMNS - set(reader.fieldnames)
         if required:
             raise ValueError(
                 f"Missing required columns: {', '.join(sorted(required))}"
@@ -278,13 +287,13 @@ def load_tracks_csv(path, *, pixel_index_coordinates: bool = True) -> TrackTable
         prop_cols = [
             col
             for col in reader.fieldnames
-            if col not in {"track_id", "t", "z", "x", "y"}
+            if col not in _SPECIAL_COLUMNS
         ]
         properties = {col: [] for col in prop_cols}
 
         for row in reader:
             track_id.append(int(float(row["track_id"])))
-            t.append(int(float(row["t"])))
+            t.append(int(float(row["frame"])))
             x.append(float(row["x"]))
             y.append(float(row["y"]))
             if has_z:
@@ -304,12 +313,31 @@ def load_tracks_csv(path, *, pixel_index_coordinates: bool = True) -> TrackTable
     )
 
 
+def load_tracks_parquet(path, *, pixel_index_coordinates: bool = True) -> TrackTable:
+    """Load a TrackTable from a Parquet file with ``track_id, frame, x,
+    y[, z]`` columns, any other column a per-row property -- the
+    conventions of :func:`load_tracks_csv`. Read with polars (``pip install
+    pyvistra[parquet]``)."""
+    from .points import read_parquet_columns
+
+    columns, properties = read_parquet_columns(path, _REQUIRED_COLUMNS, _SPECIAL_COLUMNS)
+    return TrackTable.from_arrays(
+        track_id=columns["track_id"],
+        t=columns["frame"],
+        x=columns["x"],
+        y=columns["y"],
+        z=columns.get("z"),
+        properties=properties,
+        pixel_index_coordinates=pixel_index_coordinates,
+    )
+
+
 def save_tracks_csv(path, tracks: TrackTable) -> None:
-    """Save a TrackTable to a CSV file with ``track_id, t, x, y[, z]`` columns.
+    """Save a TrackTable to a CSV file with ``track_id, frame, x, y[, z]`` columns.
 
     Any per-row properties are written as additional columns.
     """
-    fieldnames = ["track_id", "t", "x", "y"]
+    fieldnames = ["track_id", "frame", "x", "y"]
     if tracks.z is not None:
         fieldnames.append("z")
     fieldnames.extend(sorted(tracks.properties.keys()))
@@ -320,7 +348,7 @@ def save_tracks_csv(path, tracks: TrackTable) -> None:
         for i in range(tracks.n_rows):
             row = {
                 "track_id": int(tracks.track_id[i]),
-                "t": int(tracks.t[i]),
+                "frame": int(tracks.t[i]),
                 "x": float(tracks.x[i]),
                 "y": float(tracks.y[i]),
             }

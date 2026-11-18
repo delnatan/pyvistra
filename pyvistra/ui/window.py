@@ -247,6 +247,9 @@ class ImageWindow(QMainWindow):
     # view_changed's coarser "slice or channel changed") uses this instead.
     channel_changed = Signal(int)
     label_changed = Signal(object)  # Emits SparseLabels when labels change
+    # What the brush paints changed: the active mask layer, active_label,
+    # brush_size or preserve_labels. Read the new state off the window.
+    paint_state_changed = Signal()
     mask_layer_added = Signal(str)  # Emits mask layer name when added
     mask_layer_removed = Signal(str)  # Emits mask layer name when removed
     track_layer_added = Signal(str)  # Emits track layer name when added
@@ -255,6 +258,7 @@ class ImageWindow(QMainWindow):
     point_layer_removed = Signal(str)  # Emits point layer name when removed
     # New layer system signals
     layer_added = Signal(object)  # Emits Layer when added
+    layer_renamed = Signal(str, str)  # Emits (old name, new name)
     layer_removed = Signal(object)  # Emits Layer when removed
     shape_selection_changed = Signal(object, object)  # Emits (Layer, shape_id) or (None, None)
 
@@ -1312,10 +1316,7 @@ class ImageWindow(QMainWindow):
         if not self._mask_layers:
             self.add_mask_layer("Labels-1", labels=value)
         elif self._active_mask_layer and self._active_mask_layer in self._mask_layers:
-            self._mask_layers[self._active_mask_layer]["labels"] = value
-            visual = self._mask_layers[self._active_mask_layer]["visual"]
-            if visual is not None:
-                visual.set_labels(value)
+            self.set_mask_layer_labels(self._active_mask_layer, value)
 
     @property
     def label_overlay(self):
@@ -1330,11 +1331,12 @@ class ImageWindow(QMainWindow):
             return
         if not self._mask_layers:
             self.add_mask_layer("Labels-1", labels=labels)
+            self.label_changed.emit(labels)
+            self.canvas.update()
         else:
+            # The setter (set_mask_layer_labels) emits label_changed itself.
             self.labels = labels
             self._ensure_label_overlay()
-        self.label_changed.emit(labels)
-        self.canvas.update()
 
     def get_labels(self):
         """Return the current SparseLabels instance."""
@@ -1415,6 +1417,34 @@ class ImageWindow(QMainWindow):
         self.canvas.update()
         return entry
 
+    def rename_layer(self, old_name, new_name):
+        """Rename a layer of any type.
+
+        The window still keeps per-type registries (``_mask_layers``,
+        ``_track_layers``, ``_point_layers``, each with an active name)
+        beside the unified ``self.layers``, and most methods look layers up
+        there by name -- so a rename has to move the name in all of them
+        at once, or the layer goes deaf to its own add/remove/activate
+        calls. Raises ``KeyError``/``ValueError`` like ``LayerList.rename``
+        (unknown old name, taken new name), before changing anything.
+        Emits ``layer_renamed(old, new)``."""
+        self.layers.rename(old_name, new_name)
+        for registry, active_attr in (
+            (self._mask_layers, "_active_mask_layer"),
+            (self._track_layers, "_active_track_layer"),
+            (self._point_layers, "_active_point_layer"),
+        ):
+            if old_name in registry:
+                items = list(registry.items())
+                registry.clear()
+                for key, entry in items:
+                    registry[new_name if key == old_name else key] = entry
+                if getattr(self, active_attr) == old_name:
+                    setattr(self, active_attr, new_name)
+        if self._focused_point_layer == old_name:
+            self._focused_point_layer = new_name
+        self.layer_renamed.emit(old_name, new_name)
+
     def _set_layer_visible(self, registry, name, visible):
         """Toggle visibility for a named layer entry in *registry*."""
         if name not in registry:
@@ -1446,6 +1476,7 @@ class ImageWindow(QMainWindow):
             else:
                 shape = (self.Y, self.X)
             labels = SparseLabels(shape)
+        previous_active = self._active_mask_layer
         visual = LabelOverlayVisual(
             self.view,
             shape_yx=(self.Y, self.X),
@@ -1460,15 +1491,41 @@ class ImageWindow(QMainWindow):
             added_signal=self.mask_layer_added,
             layer_type="labels", layer_data=labels, visual=visual,
         )
+        if self._active_mask_layer != previous_active:
+            self.paint_state_changed.emit()
+
+    def set_mask_layer_labels(self, name, labels):
+        """Replace the SparseLabels of mask layer *name* -- the
+        counterpart of ``set_track_layer_tracks``/``set_point_layer_points``.
+        Keeps the registry entry, the unified ``Layer.data`` and the
+        overlay on the same object, and emits ``label_changed``."""
+        if name not in self._mask_layers:
+            return
+        if not isinstance(labels, SparseLabels):
+            raise TypeError("labels must be a SparseLabels")
+        entry = self._mask_layers[name]
+        entry["labels"] = labels
+        if name in self.layers:
+            self.layers[name].data = labels
+        visual = entry["visual"]
+        if visual is not None:
+            visual.set_labels(labels)
+            if labels.ndim == 3:
+                visual.update_slice(self.z_idx)
+        self.label_changed.emit(labels)
+        self.canvas.update()
 
     def remove_mask_layer(self, name):
         """Remove a named mask layer and clean up its visual."""
         if name not in self._mask_layers:
             return
+        previous_active = self._active_mask_layer
         self._unregister_layer_entry(
             self._mask_layers, "_active_mask_layer", name,
             removed_signal=self.mask_layer_removed,
         )
+        if self._active_mask_layer != previous_active:
+            self.paint_state_changed.emit()
 
     def set_mask_layer_visible(self, name, visible):
         """Toggle visibility of a specific mask layer."""
@@ -1476,7 +1533,10 @@ class ImageWindow(QMainWindow):
 
     def set_active_mask_layer(self, name):
         """Switch which mask layer receives painting."""
+        previous = self._active_mask_layer
         self._set_active_layer(self._mask_layers, "_active_mask_layer", name)
+        if self._active_mask_layer != previous:
+            self.paint_state_changed.emit()
 
     # ---- Multiple Track Layers API ----
 
@@ -1600,10 +1660,12 @@ class ImageWindow(QMainWindow):
             layer_type="points", layer_data=holder, visual=visual, style=style,
         )
 
-        def _on_point_event(_kind, _pid, _name=name):
-            entry = self._point_layers.get(_name)
-            if entry is None:
-                return
+        point_entry = self._point_layers[name]
+
+        # Holds the entry itself rather than looking it up by name, so a
+        # rename (``rename_layer``) doesn't leave it listening for nothing.
+        # Removal unsubscribes it (``remove_point_layer``).
+        def _on_point_event(_kind, _pid, entry=point_entry):
             entry["points"] = entry["holder"].table
             v = entry["visual"]
             if v is not None:
@@ -1623,8 +1685,13 @@ class ImageWindow(QMainWindow):
         if not isinstance(points, PointTable):
             raise TypeError("points must be a PointTable")
 
-        self._point_layers[name]["points"] = points
-        visual = self._point_layers[name]["visual"]
+        entry = self._point_layers[name]
+        entry["points"] = points
+        # The holder is the unified Layer.data the undoable point commands
+        # act on; left on the old table, the next add/move/undo would
+        # write that old table back over this one.
+        entry["holder"].table = points
+        visual = entry["visual"]
         if visual is not None:
             visual.set_points(points)
             visual.set_time_z(self.t_idx, self.z_idx)
@@ -2961,7 +3028,7 @@ class ImageWindow(QMainWindow):
 
     @active_label.setter
     def active_label(self, value: int):
-        self._active_label = value
+        self._set_paint_state("_active_label", int(value))
 
     @property
     def brush_size(self) -> int:
@@ -2969,7 +3036,7 @@ class ImageWindow(QMainWindow):
 
     @brush_size.setter
     def brush_size(self, value: int):
-        self._brush_size = value
+        self._set_paint_state("_brush_size", int(value))
 
     @property
     def preserve_labels(self) -> bool:
@@ -2977,7 +3044,12 @@ class ImageWindow(QMainWindow):
 
     @preserve_labels.setter
     def preserve_labels(self, value: bool):
-        self._preserve_labels = value
+        self._set_paint_state("_preserve_labels", bool(value))
+
+    def _set_paint_state(self, attr, value):
+        if getattr(self, attr) != value:
+            setattr(self, attr, value)
+            self.paint_state_changed.emit()
 
     def show_metadata_dialog(self):
         dlg = MetadataDialog(self.meta, parent=self)
@@ -4399,9 +4471,9 @@ def imshow(
         app = QApplication(sys.argv)
 
     # Apply Theme
-    from ..theme import DARK_THEME
+    from .. import theme
 
-    app.setStyleSheet(DARK_THEME)
+    theme.apply(app)
 
     # Handle backward compatibility: title= keyword argument
     if meta_or_title is None and title is not None:
@@ -4470,7 +4542,7 @@ def run_app():
     """
     app = QApplication.instance()
     if app:
-        from ..theme import DARK_THEME
+        from .. import theme
 
-        app.setStyleSheet(DARK_THEME)
+        theme.apply(app)
         app.exec_()

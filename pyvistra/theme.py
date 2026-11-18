@@ -8,7 +8,18 @@ QStatusBar, QHeaderView, QSplitter) — those otherwise fall back to
 native per-OS chrome, which is what breaks cross-platform consistency.
 """
 
+from pathlib import Path
+
+from qtpy.QtCore import QEvent, QObject, Qt
+from qtpy.QtWidgets import QCheckBox, QRadioButton, QTabBar
+
 from . import colors as c
+
+# Arrow glyphs for spin boxes and combo boxes (TEXT_SECONDARY, and
+# TEXT_DISABLED for the "-disabled" variants). Styling these widgets at all
+# switches Qt to drawing their sub-controls from the stylesheet, so without
+# an image here the arrows are simply blank.
+_ICONS = (Path(__file__).parent / "_resources" / "icons").as_posix()
 
 DARK_THEME = f"""
 /* Main Window & Background */
@@ -74,6 +85,53 @@ QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {{
     color: {c.TEXT_DISABLED};
 }}
 
+QSpinBox::up-button, QDoubleSpinBox::up-button,
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    subcontrol-origin: border;
+    width: 16px;
+    border: none;
+    border-left: 1px solid {c.BORDER};
+    background: transparent;
+}}
+
+QSpinBox::up-button, QDoubleSpinBox::up-button {{
+    subcontrol-position: top right;
+    border-top-right-radius: {c.RADIUS};
+}}
+
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    subcontrol-position: bottom right;
+    border-bottom-right-radius: {c.RADIUS};
+}}
+
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{
+    background-color: {c.BG_ELEVATED_HOVER};
+}}
+
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+    image: url({_ICONS}/chevron-up.svg);
+    width: 8px;
+    height: 8px;
+}}
+
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+    image: url({_ICONS}/chevron-down.svg);
+    width: 8px;
+    height: 8px;
+}}
+
+/* ":off" is a step button at its limit (the value is already the max/min). */
+QSpinBox::up-arrow:disabled, QDoubleSpinBox::up-arrow:disabled,
+QSpinBox::up-arrow:off, QDoubleSpinBox::up-arrow:off {{
+    image: url({_ICONS}/chevron-up-disabled.svg);
+}}
+
+QSpinBox::down-arrow:disabled, QDoubleSpinBox::down-arrow:disabled,
+QSpinBox::down-arrow:off, QDoubleSpinBox::down-arrow:off {{
+    image: url({_ICONS}/chevron-down-disabled.svg);
+}}
+
 /* ComboBox */
 QComboBox {{
     background-color: {c.BG_ELEVATED};
@@ -93,6 +151,16 @@ QComboBox::drop-down {{
     subcontrol-position: top right;
     width: 16px;
     border-left: 1px solid {c.BORDER};
+}}
+
+QComboBox::down-arrow {{
+    image: url({_ICONS}/chevron-down.svg);
+    width: 8px;
+    height: 8px;
+}}
+
+QComboBox::down-arrow:disabled {{
+    image: url({_ICONS}/chevron-down-disabled.svg);
 }}
 
 QComboBox QAbstractItemView {{
@@ -314,6 +382,12 @@ QMenu::separator {{
     margin: 4px 6px;
 }}
 
+/* Where a horizontal and a vertical scroll bar meet; native (light) otherwise. */
+QAbstractScrollArea::corner {{
+    background: {c.BG_BASE};
+    border: none;
+}}
+
 /* Scrollbars — slim rectangular handle, not a rounded pill. */
 QScrollBar:vertical {{
     border: none;
@@ -496,3 +570,46 @@ QSplitter::handle:vertical {{
     height: 2px;
 }}
 """
+
+
+class _NativeChromeFix(QObject):
+    """Corrections for native chrome the stylesheet can't reach, applied to
+    each widget as it is polished.
+
+    Check and radio buttons are laid out by their full widget rect. The
+    macOS style reports a check box's *layout* rect a few pixels
+    shorter than the widget (it leaves out room for the native focus
+    ring), so layouts give it less height than it paints and place it
+    overlapping its neighbours. The stylesheet above repaints the
+    indicator to fill the widget, so with it the reported rect is simply
+    wrong: rows overlapped and clipped by a couple of pixels.
+    `WA_LayoutUsesWidgetRect` opts a widget out of that adjustment.
+
+    Tab bars don't draw their "base": in document mode the macOS style
+    paints it as a light strip across the rest of the bar (beside the
+    workspace's image tabs, for one), and no stylesheet rule reaches it.
+    The tabs' own borders already separate them from the page."""
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        if event.type() == QEvent.Type.Polish:
+            if isinstance(obj, (QCheckBox, QRadioButton)):
+                if not obj.testAttribute(Qt.WidgetAttribute.WA_LayoutUsesWidgetRect):
+                    obj.setAttribute(Qt.WidgetAttribute.WA_LayoutUsesWidgetRect, True)
+                    obj.updateGeometry()
+            elif isinstance(obj, QTabBar) and obj.drawBase():
+                obj.setDrawBase(False)
+        return False
+
+
+_chrome_fix = None
+
+
+def apply(app) -> None:
+    """Install pyvistra's look on `app`: the stylesheet, and the native
+    chrome corrections it needs (`_NativeChromeFix`). Idempotent -- the one
+    call every entry point makes instead of setting the stylesheet itself."""
+    global _chrome_fix
+    app.setStyleSheet(DARK_THEME)
+    if _chrome_fix is None:
+        _chrome_fix = _NativeChromeFix()
+        app.installEventFilter(_chrome_fix)

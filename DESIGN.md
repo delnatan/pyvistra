@@ -31,8 +31,8 @@ pyvistra/
   widgets/    Qt dialogs — one file per dialog, mostly thin and independent.
   plugins.py  Extension points: discover_plugins(), add_menu_item(),
               register_shape_context_action(). External packages (gelkit,
-              psfkit, resolvde) register into pyvistra without pyvistra
-              importing them back.
+              psfkit, resolvde, sptkit) register into pyvistra without
+              pyvistra importing them back.
 ```
 
 Layering rule of thumb: `data/` never imports Qt or vispy; `visuals/` never
@@ -46,6 +46,15 @@ nothing depends on one reader knowing about another.
   `ObservableBuffer` (`data/protocols.py`) are structural-typing contracts so
   a plugin can type-check against pyvistra without importing its concrete
   proxy classes.
+- **Layers live in two places** (known debt). `ImageWindow.layers` (a
+  `LayerList`) was meant to replace the per-type registries
+  (`_mask_layers`/`_track_layers`/`_point_layers`, each with an active
+  name), but most window methods still look layers up there. Until that
+  consolidation happens, every change of identity or data goes through one
+  window method that updates both: `rename_layer` (emits `layer_renamed`)
+  and `set_mask_layer_labels`/`set_track_layer_tracks`/
+  `set_point_layer_points`. Never call `LayerList.rename` on a window's
+  list directly.
 - **Command pattern** (`layers/commands.py`) — reversible mutations (shape,
   point and track edits) go through an `UndoStack` owned by the `Layer`, not
   through ad-hoc undo flags. Label painting is the exception: brush/fill

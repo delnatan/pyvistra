@@ -515,59 +515,54 @@ def save_points_json(path, points: PointTable) -> None:
         )
 
 
+def _polars():
+    """polars, the optional dependency every Parquet reader and writer here
+    uses (``pip install pyvistra[parquet]``)."""
+    try:
+        import polars
+    except ImportError as exc:
+        raise ImportError(
+            "polars is required for Parquet files (pip install pyvistra[parquet])"
+        ) from exc
+    return polars
+
+
+def read_parquet_columns(path, required, special) -> tuple[dict, dict]:
+    """``(columns, properties)`` of the Parquet table at *path*: the
+    *special* columns present (as lists, by name), and every other column
+    as a per-row property. Raises ValueError if a *required* one is missing."""
+    table = _polars().read_parquet(path)
+    missing = set(required) - set(table.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {', '.join(sorted(missing))}")
+    columns = {c: table[c].to_list() for c in table.columns if c in special}
+    properties = {c: table[c].to_list() for c in table.columns if c not in special}
+    return columns, properties
+
+
 def load_points_parquet(path, *, pixel_index_coordinates: bool = False) -> PointTable:
     """Load a PointTable from a Parquet file with required ``x, y, frame``
     columns (optional ``point_id``, ``z``). Any other column is carried
     through as a per-point feature, same convention as :func:`load_points_csv`.
-
-    Requires the optional ``pyarrow`` dependency (``pip install
-    pyvistra[parquet]``).
+    Read with polars (``pip install pyvistra[parquet]``).
     """
-    try:
-        import pyarrow.parquet as pq
-    except ImportError as exc:
-        raise ImportError(
-            "pyarrow is required to read Parquet point files "
-            "(pip install pyvistra[parquet])"
-        ) from exc
-
-    table = pq.read_table(path)
-    columns = set(table.column_names)
-    missing = _REQUIRED_COLUMNS - columns
-    if missing:
-        raise ValueError(f"Missing required columns: {', '.join(sorted(missing))}")
-
-    has_point_id = "point_id" in columns
-    has_z = "z" in columns
-    prop_cols = [c for c in table.column_names if c not in _SPECIAL_COLUMNS]
-
+    columns, properties = read_parquet_columns(path, _REQUIRED_COLUMNS, _SPECIAL_COLUMNS)
     return PointTable.from_arrays(
-        point_id=table.column("point_id").to_pylist() if has_point_id else None,
-        t=table.column("frame").to_pylist(),
-        x=table.column("x").to_pylist(),
-        y=table.column("y").to_pylist(),
-        z=table.column("z").to_pylist() if has_z else None,
-        properties={col: table.column(col).to_pylist() for col in prop_cols},
+        point_id=columns.get("point_id"),
+        t=columns["frame"],
+        x=columns["x"],
+        y=columns["y"],
+        z=columns.get("z"),
+        properties=properties,
         pixel_index_coordinates=pixel_index_coordinates,
     )
 
 
 def save_points_parquet(path, points: PointTable) -> None:
     """Save a PointTable to a Parquet file with ``point_id, frame, x, y[,
-    z]`` columns plus one column per feature.
-
-    Requires the optional ``pyarrow`` dependency (``pip install
-    pyvistra[parquet]``).
+    z]`` columns plus one column per feature. Written with polars
+    (``pip install pyvistra[parquet]``).
     """
-    try:
-        import pyarrow as pa
-        import pyarrow.parquet as pq
-    except ImportError as exc:
-        raise ImportError(
-            "pyarrow is required to write Parquet point files "
-            "(pip install pyvistra[parquet])"
-        ) from exc
-
     data: dict[str, object] = {
         "point_id": points.point_id,
         "frame": points.t,
@@ -577,5 +572,4 @@ def save_points_parquet(path, points: PointTable) -> None:
     if points.z is not None:
         data["z"] = points.z
     data.update(points.properties)
-
-    pq.write_table(pa.table(data), path)
+    _polars().DataFrame(data).write_parquet(path)

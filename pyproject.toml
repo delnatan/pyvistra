@@ -33,7 +33,7 @@ dependencies = [
 [project.optional-dependencies]
 czi = ["aicspylibczi"]
 nd2 = ["nd2"]
-parquet = ["pyarrow"]
+parquet = ["polars"]
 
 [project.scripts]
 pyvistra = "pyvistra.__main__:main"
@@ -41,4 +41,8 @@ pyvistra = "pyvistra.__main__:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["pyvistra*"]
+
+[tool.setuptools.package-data]
+# Bundled colormaps, toolbar icons and the theme's arrow glyphs.
+pyvistra = ["_resources/**/*", "py.typed"]
 

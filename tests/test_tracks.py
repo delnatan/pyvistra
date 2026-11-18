@@ -1,6 +1,7 @@
 import numpy as np
+import pytest
 
-from pyvistra.data.tracks import TrackTable, load_tracks_csv, save_tracks_csv
+from pyvistra.data.tracks import TrackTable, load_tracks_csv, load_tracks_parquet, save_tracks_csv
 
 
 def test_track_table_sorts_by_track_and_time():
@@ -87,7 +88,7 @@ def test_track_csv_roundtrip_with_z(tmp_path):
 
 def test_load_tracks_csv_missing_columns_raises(tmp_path):
     path = tmp_path / "bad.csv"
-    path.write_text("track_id,t,x\n1,0,1.0\n")
+    path.write_text("track_id,frame,x\n1,0,1.0\n")
 
     try:
         load_tracks_csv(str(path))
@@ -152,3 +153,144 @@ def test_track_csv_roundtrip_preserves_properties(tmp_path):
 
     assert np.allclose(loaded.properties["speed"], [1.0, 2.0, 3.0])
     assert loaded.properties["label"].tolist() == ["a", "b", "c"]
+
+
+def test_aggregate_property_is_per_track_nanmean():
+    tracks = TrackTable.from_arrays(
+        track_id=[1, 1, 1, 2, 2, 3],
+        t=[0, 1, 2, 0, 1, 0],
+        x=[0] * 6,
+        y=[0] * 6,
+        properties={"v": [1.0, np.nan, 3.0, np.nan, np.nan, 7.0]},
+    )
+    out = tracks.aggregate_property(tracks.properties["v"])
+    assert out[0] == 2.0
+    assert np.isnan(out[1])  # all-NaN track: NaN, not 0 and no warning
+    assert out[2] == 7.0
+
+
+class _Recorder:
+    """Stands in for a vispy visual: keeps the last set_data call."""
+
+    order = 0
+    visible = True
+
+    def __init__(self, **_kw):
+        self.last = None
+
+    def set_data(self, **kw):
+        self.last = kw
+
+    def set_gl_state(self, *a, **k):
+        pass
+
+
+def _visual(monkeypatch, tracks, **style):
+    from pyvistra.visuals import tracks as mod
+
+    class _Scene:
+        class visuals:
+            Line = _Recorder
+            Markers = _Recorder
+
+    monkeypatch.setattr(mod, "scene", _Scene)
+
+    class _View:
+        scene = None
+
+    visual = mod.TrackLayerVisual(_View(), **style)
+    visual.set_tracks(tracks)
+    return visual
+
+
+def _two_tracks():
+    # Track 1 lives frames 0-3, track 2 frames 5-7.
+    return TrackTable.from_arrays(
+        track_id=[1, 1, 1, 1, 2, 2, 2],
+        t=[0, 1, 2, 3, 5, 6, 7],
+        x=[0, 1, 2, 3, 10, 11, 12],
+        y=[0, 0, 0, 0, 5, 5, 5],
+        pixel_index_coordinates=False,
+    )
+
+
+def test_refresh_draws_each_tracks_trail_up_to_now(monkeypatch):
+    visual = _visual(monkeypatch, _two_tracks(), trail_window=None)
+    visual.set_time_z(2)
+    pos = visual._line.last["pos"]
+    # Track 1's first three vertices -> two segments; track 2 not born yet.
+    assert pos.shape == (4, 2)
+    assert pos[:, 0].tolist() == [0, 1, 1, 2]
+    # Older segments fade: alpha rises with age within the visible trail.
+    alpha = visual._line.last["color"][:, 3]
+    assert alpha[0] < alpha[2]
+    # Head only where the track has a vertex at the current frame.
+    assert visual._heads.last["pos"].tolist() == [[2.0, 0.0]]
+
+
+def test_refresh_trail_window_limits_history(monkeypatch):
+    visual = _visual(monkeypatch, _two_tracks(), trail_window=1)
+    visual.set_time_z(7)
+    pos = visual._line.last["pos"]
+    assert pos[:, 0].tolist() == [11, 12]  # frames 6-7 of track 2 only
+
+
+def test_show_all_times_draws_every_track_whole(monkeypatch):
+    visual = _visual(monkeypatch, _two_tracks(), show_all_times=True)
+    visual.set_time_z(0)
+    assert visual._line.last["pos"].shape == (2 * (3 + 2), 2)
+    assert visual.style["show_all_times"] is True
+
+
+def test_load_tracks_parquet_reads_points_conventions(tmp_path):
+    pl = pytest.importorskip("polars")
+    path = tmp_path / "tracks.parquet"
+    pl.DataFrame({
+        "track_id": [2, 1, 1, 2],
+        "frame": [0, 1, 0, 1],
+        "x": [5.0, 1.5, 1.0, 5.5],
+        "y": [6.0, 2.5, 2.0, 6.5],
+        "se_x": [0.1, 0.2, 0.3, 0.4],
+        "region_class": ["a", "b", "b", "a"],
+    }).write_parquet(path)
+
+    tracks = load_tracks_parquet(str(path))
+
+    assert tracks.pixel_index_coordinates
+    assert tracks.track_id.tolist() == [1, 1, 2, 2]
+    assert tracks.t.tolist() == [0, 1, 0, 1]
+    assert np.allclose(tracks.x, [1.0, 1.5, 5.0, 5.5])
+    assert np.allclose(tracks.properties["se_x"], [0.3, 0.2, 0.1, 0.4])
+    assert tracks.properties["region_class"].tolist() == ["b", "b", "a", "a"]
+
+
+def test_load_tracks_parquet_missing_columns_raises(tmp_path):
+    pl = pytest.importorskip("polars")
+    path = tmp_path / "bad.parquet"
+    pl.DataFrame({"track_id": [1], "t": [0], "x": [1.0], "y": [1.0]}).write_parquet(path)
+    with pytest.raises(ValueError, match="frame"):
+        load_tracks_parquet(str(path))
+
+
+def test_layer_manager_loads_a_track_file_as_a_track_layer(tmp_path, monkeypatch):
+    pl = pytest.importorskip("polars")
+    from qtpy.QtWidgets import QFileDialog, QMessageBox
+
+    from pyvistra import imshow
+    from pyvistra.ui.layer_manager import LayerManager
+
+    path = tmp_path / "my_tracks.parquet"
+    pl.DataFrame({"track_id": [1, 1], "frame": [0, 1], "x": [1.0, 2.0], "y": [3.0, 4.0]}).write_parquet(path)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(path), "")))
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
+    win = imshow(np.zeros((2, 1, 1, 8, 8), np.uint16), "tracks")
+    manager = LayerManager()
+    manager._current_window = win
+    try:
+        manager._on_load_layer_file("tracks")
+        layer = win.layers["my_tracks"]
+        assert layer.layer_type == "tracks" and layer.data.n_rows == 2
+        assert layer.data.pixel_index_coordinates
+    finally:
+        manager.close()
+        win.close()
